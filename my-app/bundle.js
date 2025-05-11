@@ -1,0 +1,993 @@
+// ==== File: eslint.config.js ====
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+
+export default tseslint.config(
+  { ignores: ['dist'] },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
+      ],
+    },
+  },
+)
+
+
+// ==== File: postcss.config.js ====
+export default {
+    plugins: {
+      tailwindcss: {},
+      autoprefixer: {},
+    },
+  }
+
+// ==== File: src/App.tsx ====
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Layout from './components/Layout';
+import CatalogPage from './pages/CatalogPage';
+
+// Placeholder pages that will be implemented later
+const FeaturesPage = () => <div className="py-12 text-center">Страница в разработке</div>;
+const AboutPage = () => <div className="py-12 text-center">Страница в разработке</div>;
+const NotFoundPage = () => (
+  <div className="py-12 text-center">
+    <h1 className="text-2xl font-bold mb-4">404 - Страница не найдена</h1>
+    <p className="mb-6">Запрашиваемая страница не существует.</p>
+    <a href="/" className="text-orange-500 hover:text-orange-600">Вернуться на главную</a>
+  </div>
+);
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<CatalogPage />} />
+          <Route path="/features" element={<FeaturesPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </Layout>
+    </BrowserRouter>
+  );
+}
+
+// ==== File: src/api/client.ts ====
+import axios from 'axios';
+
+const client = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'https://api.offer-hunt.com/v1',
+  headers: { 'Content-Type': 'application/json' },
+});
+
+client.interceptors.request.use(config => {
+  const token = localStorage.getItem('token');
+  if (token) config.headers['Authorization'] = `Bearer ${token}`;
+  return config;
+});
+
+client.interceptors.response.use(
+  response => response,
+  error => {
+    // Handle common errors like 401 for token refresh or redirection
+    if (error.response?.status === 401) {
+      // Redirect to login or refresh token
+      localStorage.removeItem('token');
+    }
+    return Promise.reject(error);
+  }
+);
+
+export default client;
+
+// ==== File: src/api/coursesApi.ts ====
+import client from './client';
+import type { Course } from '../types/Course';
+import { mockCourses } from './mockData';
+
+// Use this flag to switch between mock data and real API
+const USE_MOCK_DATA = true;
+
+interface CourseParams {
+  search?: string;
+  sort?: 'popularity' | 'difficulty' | 'duration';
+  level?: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+  tags?: string[];
+}
+
+export async function getCourses(params?: CourseParams): Promise<Course[]> {
+  if (USE_MOCK_DATA) {
+    return new Promise((resolve) => {
+      // Simulate network delay
+      setTimeout(() => {
+        let filteredCourses = [...mockCourses];
+        
+        // Apply filters
+        if (params?.search) {
+          const searchLower = params.search.toLowerCase();
+          filteredCourses = filteredCourses.filter(
+            course => 
+              course.title.toLowerCase().includes(searchLower) || 
+              course.authorName.toLowerCase().includes(searchLower) ||
+              course.tags.some(tag => tag.toLowerCase().includes(searchLower))
+          );
+        }
+        
+        if (params?.level) {
+          filteredCourses = filteredCourses.filter(
+            course => course.difficulty === params.level
+          );
+        }
+        
+        if (params?.language) {
+          filteredCourses = filteredCourses.filter(
+            course => course.language === params.language
+          );
+        }
+        
+        // Apply sorting
+        if (params?.sort) {
+          switch (params.sort) {
+            case 'popularity':
+              filteredCourses = filteredCourses.sort(
+                (a, b) => b.stats.enrollments - a.stats.enrollments
+              );
+              break;
+            case 'difficulty':
+              // Sort by difficulty level (Beginner → Middle → Senior)
+              const difficultyOrder = { 'Beginner': 1, 'Middle': 2, 'Senior': 3 };
+              filteredCourses = filteredCourses.sort(
+                (a, b) => difficultyOrder[a.difficulty] - difficultyOrder[b.difficulty]
+              );
+              break;
+            case 'duration':
+              filteredCourses = filteredCourses.sort(
+                (a, b) => b.estimatedDuration - a.estimatedDuration
+              );
+              break;
+          }
+        }
+        
+        resolve(filteredCourses);
+      }, 600); // Simulate a short delay
+    });
+  } else {
+    // Real API call
+    const response = await client.get<Course[]>('/courses', { params });
+    return response.data;
+  }
+}
+
+export async function getCourseById(id: string): Promise<Course> {
+  if (USE_MOCK_DATA) {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        const course = mockCourses.find(c => c.id === id);
+        if (course) {
+          resolve(course);
+        } else {
+          reject(new Error('Course not found'));
+        }
+      }, 300);
+    });
+  } else {
+    const response = await client.get<Course>(`/courses/${id}`);
+    return response.data;
+  }
+}
+
+export async function enrollCourse(courseId: string) {
+  if (USE_MOCK_DATA) {
+    return new Promise(resolve => {
+      setTimeout(() => {
+        resolve({ success: true, courseId });
+      }, 500);
+    });
+  } else {
+    const response = await client.post(`/courses/${courseId}/enroll`);
+    return response.data;
+  }
+}
+
+export async function rateCourse(courseId: string, value: number) {
+  if (USE_MOCK_DATA) {
+    return new Promise(resolve => {
+      setTimeout(() => {
+        resolve({ success: true, courseId, value });
+      }, 500);
+    });
+  } else {
+    const response = await client.post(`/courses/${courseId}/rating`, { value });
+    return response.data;
+  }
+}
+
+// ==== File: src/api/mockData.ts ====
+// This file provides mock data for development until the actual API is connected
+import { Course } from '../types/Course';
+
+export const mockCourses: Course[] = [
+  {
+    id: '1',
+    authorName: 'Иван Иванов',
+    coverUrl: '/images/courses/python.png',
+    title: 'Подготовка к Python Middle собеседованию',
+    difficulty: 'Middle',
+    language: 'Python',
+    tags: ['Python', 'Backend', 'Algorithms'],
+    estimatedDuration: 20,
+    stats: {
+      enrollments: 156,
+      avgCompletion: 73,
+      avgScore: 4.9
+    },
+    lessons: [
+      { id: '101', title: 'Основы Python', type: 'Theory', hasQuiz: true },
+      { id: '102', title: 'Структуры данных', type: 'Theory', hasQuiz: true },
+      { id: '103', title: 'Алгоритмы', type: 'Coding', hasQuiz: true }
+    ]
+  },
+  {
+    id: '2',
+    authorName: 'Полина Смирнова',
+    coverUrl: '/images/courses/algos.png',
+    title: 'Алгоритмы и структуры данных для собеседований',
+    difficulty: 'Middle',
+    language: 'JavaScript',
+    tags: ['Algorithms', 'Data Structures', 'Leetcode'],
+    estimatedDuration: 15,
+    stats: {
+      enrollments: 243,
+      avgCompletion: 68,
+      avgScore: 4.8
+    },
+    lessons: [
+      { id: '201', title: 'Сложность алгоритмов', type: 'Theory', hasQuiz: true },
+      { id: '202', title: 'Сортировки', type: 'Coding', hasQuiz: true },
+      { id: '203', title: 'Деревья и графы', type: 'Theory', hasQuiz: true }
+    ]
+  },
+  {
+    id: '3',
+    authorName: 'Петр Петров',
+    coverUrl: '/images/courses/anal.png',
+    title: 'Интервью аналитика: SQL, Excel, кейсы',
+    difficulty: 'Beginner',
+    language: 'SQL',
+    tags: ['SQL', 'Analytics', 'Excel'],
+    estimatedDuration: 12,
+    stats: {
+      enrollments: 189,
+      avgCompletion: 82,
+      avgScore: 4.8
+    },
+    lessons: [
+      { id: '301', title: 'Основы SQL', type: 'Theory', hasQuiz: true },
+      { id: '302', title: 'Сложные запросы', type: 'Coding', hasQuiz: true },
+      { id: '303', title: 'Аналитические кейсы', type: 'Theory', hasQuiz: false }
+    ]
+  },
+  {
+    id: '4',
+    authorName: 'Василий Васильев',
+    coverUrl: '/images/courses/softs.png',
+    title: 'Расскажи о себе: soft skills на собеседовании',
+    difficulty: 'Beginner',
+    language: 'Русский',
+    tags: ['Soft skills', 'HR', 'Interview'],
+    estimatedDuration: 8,
+    stats: {
+      enrollments: 315,
+      avgCompletion: 91,
+      avgScore: 5.0
+    },
+    lessons: [
+      { id: '401', title: 'Самопрезентация', type: 'Theory', hasQuiz: true },
+      { id: '402', title: 'Сложные вопросы', type: 'Theory', hasQuiz: true },
+      { id: '403', title: 'Обратная связь', type: 'Theory', hasQuiz: false }
+    ]
+  },
+  {
+    id: '5',
+    authorName: 'Александра Александрова',
+    coverUrl: '/images/courses/sysdis.png',
+    title: 'System Design для Senior',
+    difficulty: 'Senior',
+    language: 'English',
+    tags: ['System Design', 'Architecture', 'Senior'],
+    estimatedDuration: 25,
+    stats: {
+      enrollments: 142,
+      avgCompletion: 62,
+      avgScore: 4.7
+    },
+    lessons: [
+      { id: '501', title: 'Основы системного дизайна', type: 'Theory', hasQuiz: true },
+      { id: '502', title: 'Масштабирование', type: 'Theory', hasQuiz: true },
+      { id: '503', title: 'Практические кейсы', type: 'Coding', hasQuiz: true }
+    ]
+  },
+  {
+    id: '6',
+    authorName: 'Андрей Андреев',
+    coverUrl: '/images/courses/js.png',
+    title: 'JavaScript для Junior Frontend',
+    difficulty: 'Beginner',
+    language: 'JavaScript',
+    tags: ['JavaScript', 'Frontend', 'Web'],
+    estimatedDuration: 18,
+    stats: {
+      enrollments: 278,
+      avgCompletion: 76,
+      avgScore: 5.0
+    },
+    lessons: [
+      { id: '601', title: 'Основы JavaScript', type: 'Theory', hasQuiz: true },
+      { id: '602', title: 'DOM манипуляции', type: 'Theory', hasQuiz: true },
+      { id: '603', title: 'Асинхронный JavaScript', type: 'Coding', hasQuiz: true }
+    ]
+  }
+];
+
+// Modify the coursesApi.ts file to use mock data
+// You'll replace this with actual API calls later
+
+export function setupMockApi() {
+  // You can intercept axios here if needed
+  console.log('Mock API setup complete');
+}
+
+// ==== File: src/components/CourseCard.tsx ====
+import React from 'react';
+import { Link } from 'react-router-dom';
+import type { Course } from '../types/Course';
+
+interface CourseCardProps {
+  course: Course;
+}
+
+const CourseCard: React.FC<CourseCardProps> = ({ course }) => {
+  const getDifficultyLabel = (difficulty: string) => {
+    switch (difficulty) {
+      case 'Beginner':
+        return 'Для начинающих';
+      case 'Middle':
+        return 'Средний уровень';
+      case 'Senior':
+        return 'Продвинутый уровень';
+      default:
+        return difficulty;
+    }
+  };
+
+  return (
+    <Link to={`/courses/${course.id}`} className="block h-full">
+      <div className="card h-48 sm:h-56 bg-gray-300 relative overflow-hidden rounded-2xl">
+        {/* Фон */}
+        <img
+          src={course.coverUrl}
+          alt={course.title}
+          className="w-full h-full object-cover"
+        />
+        {/* Оверлей */}
+        <div className="absolute inset-0 bg-gray-500 opacity-30 rounded-2xl" />
+        {/* Контент */}
+        <div className="absolute inset-0 z-10 p-4 flex flex-col justify-between">
+          {/* Автор и заголовок */}
+          <div>
+            <div className="mb-1 text-xs text-white">{course.authorName}</div>
+            <h3 className="text-lg font-light leading-tight line-clamp-2 text-white">
+              {course.title}
+            </h3>
+          </div>
+          {/* Статистика */}
+          <div className="flex items-center space-x-6 text-white">
+            {/* Рейтинг */}
+            <div className="flex items-center">
+              <span className="text-yellow-400 mr-1 text-xs">★</span>
+              <span className="text-sm">{course.stats.avgScore.toFixed(1)}</span>
+            </div>
+            {/* Длительность */}
+            <div className="flex items-center">
+              <svg className="w-3.5 h-3.5 text-green-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 8V12L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+              </svg>
+              <span className="text-sm">{course.estimatedDuration} ч</span>
+            </div>
+            {/* Уровень */}
+            <div className="flex items-center">
+              <svg className="w-3.5 h-3.5 text-blue-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <span className="text-sm">{getDifficultyLabel(course.difficulty)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+};
+
+export default CourseCard;
+
+
+// ==== File: src/components/CourseList.tsx ====
+import React from 'react';
+import type { Course } from '../types/Course';
+import CourseCard from './CourseCard';
+
+interface CourseListProps {
+  courses: Course[];
+  loading?: boolean;
+  error?: Error | null;
+}
+
+const CourseList: React.FC<CourseListProps> = ({ 
+  courses, 
+  loading = false, 
+  error = null 
+}) => {
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-16">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-orange-500"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-red-500 mb-2">Произошла ошибка при загрузке курсов</div>
+        <div className="text-gray-500 text-sm">{error.message}</div>
+        <button 
+          onClick={() => window.location.reload()}
+          className="mt-4 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+        >
+          Попробовать снова
+        </button>
+      </div>
+    );
+  }
+
+  if (courses.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-gray-500 mb-2">Курсы не найдены</div>
+        <div className="text-gray-400 text-sm">Попробуйте изменить параметры поиска</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {courses.map(course => (
+        <CourseCard key={course.id} course={course} />
+      ))}
+    </div>
+  );
+};
+
+export default CourseList;
+
+// ==== File: src/components/Filters.tsx ====
+import React from 'react';
+
+interface FiltersProps {
+  onChange: (filters: { sort?: 'popularity' | 'difficulty' | 'duration'; level?: string; language?: string }) => void;
+}
+
+const Filters: React.FC<FiltersProps> = ({ onChange }) => {
+  const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onChange({ sort: e.target.value as 'popularity' | 'difficulty' | 'duration' });
+  };
+
+  const handleLevelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onChange({ level: e.target.value });
+  };
+
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onChange({ language: e.target.value });
+  };
+
+  return (
+    <div className="flex flex-wrap gap-2 items-center">
+      {/* Сортировка */}
+      <div className="relative">
+        <select
+          onChange={handleSortChange}
+          defaultValue="popularity"
+          className="select-filter select-primary rounded-md appearance-none pr-6 pl-3 py-1.5 text-sm"
+        >
+          <option value="popularity">Сначала: Популярное</option>
+          <option value="difficulty">Сначала: Сложность</option>
+          <option value="duration">Сначала: Длительность</option>
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-white">
+          <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+
+      {/* Уровень */}
+      <div className="relative">
+        <select
+          onChange={handleLevelChange}
+          defaultValue=""
+          className="select-filter select-dark rounded-md appearance-none pr-6 pl-3 py-1.5 text-sm"
+        >
+          <option value="">Уровень</option>
+          <option value="Beginner">Beginner</option>
+          <option value="Middle">Middle</option>
+          <option value="Senior">Senior</option>
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-white">
+          <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+
+      {/* Язык */}
+      <div className="relative">
+        <select
+          onChange={handleLanguageChange}
+          defaultValue=""
+          className="select-filter select-dark rounded-md appearance-none pr-6 pl-3 py-1.5 text-sm"
+        >
+          <option value="">Язык</option>
+          <option value="JavaScript">JavaScript</option>
+          <option value="Python">Python</option>
+          <option value="SQL">SQL</option>
+          <option value="Java">Java</option>
+          <option value="C++">C++</option>
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-white">
+          <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Filters;
+
+
+// ==== File: src/components/Layout.tsx ====
+import React from 'react';
+import Navbar from './Navbar';
+
+interface LayoutProps {
+  children: React.ReactNode;
+}
+
+const Layout: React.FC<LayoutProps> = ({ children }) => {
+  return (
+    <div className="min-h-screen flex flex-col bg-gray-50">
+      <Navbar />
+      <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {children}
+      </main>
+      <footer className="bg-white border-t border-gray-200 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center text-gray-500 text-sm">
+            © {new Date().getFullYear()} AI-Hunt. Все права защищены.
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default Layout;
+
+// ==== File: src/components/Navbar.tsx ====
+import React from 'react';
+import { NavLink } from 'react-router-dom';
+
+const Navbar: React.FC = () => {
+  return (
+    <nav className="bg-white shadow-sm">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between h-16">
+          <div className="flex items-center">
+            <NavLink to="/" className="flex-shrink-0 flex items-center">
+              <span className="text-2xl font-bold text-gray-900">AI-Hunt</span>
+            </NavLink>
+            <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
+              <NavLink
+                to="/"
+                className={({ isActive }) =>
+                  isActive
+                    ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                }
+              >
+                Курсы
+              </NavLink>
+              <NavLink
+                to="/features"
+                className={({ isActive }) =>
+                  isActive
+                    ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                }
+              >
+                Возможности
+              </NavLink>
+              <NavLink
+                to="/about"
+                className={({ isActive }) =>
+                  isActive
+                    ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                }
+              >
+                О нас
+              </NavLink>
+            </div>
+          </div>
+          <div className="hidden sm:ml-6 sm:flex sm:items-center">
+            <button
+              type="button"
+              className="flex items-center text-gray-700 hover:text-orange-500 transition-colors focus:outline-none"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4 mr-1"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5.121 17.804A13.937 13.937 0 0112 15c2.485 0 4.807.66 6.879 1.804M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+              </svg>
+              <span className="text-sm font-medium">Войти</span>
+            </button>
+          </div>
+          <div className="flex items-center sm:hidden">
+            {/* Mobile menu button */}
+            <button
+              type="button"
+              className="inline-flex items-center justify-center p-1.5 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-orange-500"
+              aria-expanded="false"
+            >
+              <span className="sr-only">Open main menu</span>
+              <svg
+                className="block h-5 w-5"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+                strokeWidth="2"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  );
+};
+
+export default Navbar;
+
+// ==== File: src/components/SearchBar.tsx ====
+import React, { useState } from 'react';
+
+interface SearchBarProps {
+  onSearch: (query: string) => void;
+  placeholder?: string;
+}
+
+const SearchBar: React.FC<SearchBarProps> = ({ 
+  onSearch, 
+  placeholder = 'Поиск' 
+}) => {
+  const [query, setQuery] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSearch(query);
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      onSearch(query);
+    }
+  };
+
+  return (
+    <div className="relative flex-1 max-w-lg">
+      <form onSubmit={handleSubmit}>
+        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+          <svg 
+            className="w-3 h-3 text-gray-400" 
+            xmlns="http://www.w3.org/2000/svg" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" 
+            />
+          </svg>
+        </div>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyPress={handleKeyPress}
+          placeholder={placeholder}
+          className="w-full pl-8 pr-4 py-2 rounded-lg bg-gray-100 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+        />
+      </form>
+    </div>
+  );
+};
+
+export default SearchBar;
+
+// ==== File: src/hooks/useCourses.ts ====
+import { useState, useEffect } from 'react';
+import { getCourses } from '../api/coursesApi';
+import type { Course } from '../types/Course';
+
+interface CourseFilters {
+  search?: string;
+  sort?: 'popularity' | 'difficulty' | 'duration';
+  level?: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+}
+
+export function useCourses() {
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const [filters, setFilters] = useState<CourseFilters>({
+    sort: 'popularity'
+  });
+
+  const fetchCourses = async (newFilters?: Partial<CourseFilters>) => {
+    const updatedFilters = { ...filters, ...newFilters };
+    setFilters(updatedFilters);
+    
+    setLoading(true);
+    try {
+      const data = await getCourses(updatedFilters);
+      setCourses(data);
+      setError(null);
+    } catch (e) {
+      setError(e as Error);
+      setCourses([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial fetch on mount
+  useEffect(() => {
+    fetchCourses();
+  }, []);
+
+  return { 
+    courses, 
+    loading, 
+    error, 
+    filters,
+    fetchCourses 
+  };
+}
+
+// ==== File: src/index.tsx ====
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import './styles/globals.css';
+
+createRoot(document.getElementById('root')!).render(<App />);
+
+
+// ==== File: src/main.tsx ====
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import './styles/globals.css'
+import App from './App'
+
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+
+// ==== File: src/pages/CatalogPage.tsx ====
+import React, { useEffect } from 'react';
+import SearchBar from '../components/SearchBar';
+import Filters from '../components/Filters';
+import CourseList from '../components/CourseList';
+import { useCourses } from '../hooks/useCourses';
+
+const CatalogPage: React.FC = () => {
+  const { courses, loading, error, fetchCourses } = useCourses();
+
+  useEffect(() => {
+    document.title = 'Каталог курсов - AI-Hunt';
+  }, []);
+
+  const handleSearch = (query: string) => {
+    fetchCourses({ search: query });
+  };
+
+  const handleFilterChange = (filters: { sort?: string; level?: string; language?: string }) => {
+    fetchCourses(filters);
+  };
+
+  return (
+    <div>
+      <h1 className="text-3xl font-bold text-gray-900 mb-8">Каталог курсов</h1>
+      
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-8">
+        <SearchBar onSearch={handleSearch} placeholder="Поиск курсов..." />
+        <Filters onChange={handleFilterChange} />
+      </div>
+
+      <CourseList 
+        courses={courses} 
+        loading={loading} 
+        error={error} 
+      />
+    </div>
+  );
+};
+
+export default CatalogPage;
+
+// ==== File: src/types/Course.ts ====
+export interface LessonSummary {
+  id: string;
+  title: string;
+  type: 'Theory' | 'Coding';
+  hasQuiz: boolean;
+}
+
+export interface CourseStats {
+  enrollments: number;
+  avgCompletion: number;
+  avgScore: number;
+}
+
+export interface Course {
+  id: string;
+  authorName: string;
+  coverUrl: string;
+  title: string;
+  difficulty: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+  tags: string[];
+  estimatedDuration: number; // в часах
+  stats: CourseStats;
+  lessons: LessonSummary[];
+}
+
+// ==== File: src/vite-env.d.ts ====
+/// <reference types="vite/client" />
+
+
+// ==== File: tailwind.config.js ====
+/** @type {import('tailwindcss').Config} */
+export default {
+    content: [
+      "./index.html",
+      "./src/**/*.{js,ts,jsx,tsx}",
+    ],
+    theme: {
+      extend: {
+        colors: {
+          orange: {
+            DEFAULT: '#e85d04',
+            50: '#fff7ed',
+            100: '#ffedd5',
+            200: '#fed7aa',
+            300: '#fdba74',
+            400: '#fb923c',
+            500: '#f97316',
+            600: '#ea580c',
+            700: '#c2410c',
+            800: '#9a3412',
+            900: '#7c2d12',
+            950: '#431407',
+          },
+        },
+        boxShadow: {
+          card: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+        },
+        fontFamily: {
+          sans: [
+            'Inter',
+            'system-ui',
+            '-apple-system',
+            'BlinkMacSystemFont',
+            '"Segoe UI"',
+            'Roboto',
+            '"Helvetica Neue"',
+            'Arial',
+            'sans-serif',
+          ],
+        },
+      },
+    },
+    plugins: [
+      require('@tailwindcss/line-clamp'),
+    ],
+  }
+
+// ==== File: vite.config.ts ====
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'url'
+import { dirname, resolve } from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    port: 3000,
+    open: true,
+  },
+})
+
