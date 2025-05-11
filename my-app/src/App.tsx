@@ -2,11 +2,13 @@ import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import CatalogPage from './pages/CatalogPage';
+import ProfilePage from './pages/ProfilePage'; // Добавляем импорт новой страницы
 import { useAuth } from './hooks/useAuth';
 
 // Placeholder pages that will be implemented later
 const FeaturesPage = () => <div className="py-12 text-center">Страница в разработке</div>;
 const AboutPage = () => <div className="py-12 text-center">Страница в разработке</div>;
+const CreateCoursePage = () => <div className="py-12 text-center">Страница создания курса в разработке</div>; // Заглушка для страницы создания курса
 const NotFoundPage = () => (
   <div className="py-12 text-center">
     <h1 className="text-2xl font-bold mb-4">404 - Страница не найдена</h1>
@@ -33,6 +35,8 @@ export default function App() {
           <Route path="/" element={<CatalogPage />} />
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/profile" element={<ProfilePage />} /> {/* Добавляем маршрут для профиля */}
+          <Route path="/create-course" element={<CreateCoursePage />} /> {/* Добавляем маршрут для создания курса */}
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Layout>

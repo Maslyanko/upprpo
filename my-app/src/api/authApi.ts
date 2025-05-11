@@ -12,27 +12,33 @@ interface RegisterData {
   fullName: string;
 }
 
+interface AuthTokenResponse {
+  accessToken: string;
+}
+
 export async function login(data: LoginData): Promise<User> {
-  const response = await client.post('/auth/login', data);
+  // Получаем токен
+  const response = await client.post<AuthTokenResponse>('/auth/login', data);
   const { accessToken } = response.data;
   localStorage.setItem('token', accessToken);
   
   // Получаем информацию о пользователе
-  const userResponse = await client.get('/users/me');
+  const userResponse = await client.get<User>('/users/me');
   localStorage.setItem('user', JSON.stringify(userResponse.data));
   
   return userResponse.data;
 }
 
 export async function register(data: RegisterData): Promise<User> {
-  // Сначала регистрируем пользователя
+  // Регистрируем пользователя
   await client.post('/auth/register', {
     email: data.email,
-    password: data.password
+    password: data.password,
+    fullName: data.fullName
   });
 
   // Затем выполняем вход
-  const loginResponse = await client.post('/auth/login', {
+  const loginResponse = await client.post<AuthTokenResponse>('/auth/login', {
     email: data.email,
     password: data.password
   });
@@ -41,7 +47,7 @@ export async function register(data: RegisterData): Promise<User> {
   localStorage.setItem('token', accessToken);
 
   // Обновляем профиль с ФИО
-  const userResponse = await client.patch('/users/me', {
+  const userResponse = await client.patch<User>('/users/me', {
     fullName: data.fullName
   });
   

@@ -1,3 +1,6 @@
+// ==== File: bundle.js ====
+
+
 // ==== File: eslint.config.js ====
 import js from '@eslint/js'
 import globals from 'globals'
@@ -38,10 +41,11 @@ export default {
   }
 
 // ==== File: src/App.tsx ====
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import CatalogPage from './pages/CatalogPage';
+import { useAuth } from './hooks/useAuth';
 
 // Placeholder pages that will be implemented later
 const FeaturesPage = () => <div className="py-12 text-center">Страница в разработке</div>;
@@ -55,6 +59,16 @@ const NotFoundPage = () => (
 );
 
 export default function App() {
+  const { isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
+      </div>
+    );
+  }
+
   return (
     <BrowserRouter>
       <Layout>
@@ -67,6 +81,63 @@ export default function App() {
       </Layout>
     </BrowserRouter>
   );
+}
+
+// ==== File: src/api/authApi.ts ====
+import client from './client';
+import type { User } from '../types/User';
+
+interface LoginData {
+  email: string;
+  password: string;
+}
+
+interface RegisterData {
+  email: string;
+  password: string;
+  fullName: string;
+}
+
+export async function login(data: LoginData): Promise<User> {
+  const response = await client.post('/auth/login', data);
+  const { accessToken } = response.data;
+  localStorage.setItem('token', accessToken);
+  
+  // Получаем информацию о пользователе
+  const userResponse = await client.get('/users/me');
+  localStorage.setItem('user', JSON.stringify(userResponse.data));
+  
+  return userResponse.data;
+}
+
+export async function register(data: RegisterData): Promise<User> {
+  // Сначала регистрируем пользователя
+  await client.post('/auth/register', {
+    email: data.email,
+    password: data.password
+  });
+
+  // Затем выполняем вход
+  const loginResponse = await client.post('/auth/login', {
+    email: data.email,
+    password: data.password
+  });
+  
+  const { accessToken } = loginResponse.data;
+  localStorage.setItem('token', accessToken);
+
+  // Обновляем профиль с ФИО
+  const userResponse = await client.patch('/users/me', {
+    fullName: data.fullName
+  });
+  
+  localStorage.setItem('user', JSON.stringify(userResponse.data));
+  return userResponse.data;
+}
+
+export function logout() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
 }
 
 // ==== File: src/api/client.ts ====
@@ -86,10 +157,15 @@ client.interceptors.request.use(config => {
 client.interceptors.response.use(
   response => response,
   error => {
-    // Handle common errors like 401 for token refresh or redirection
     if (error.response?.status === 401) {
-      // Redirect to login or refresh token
+      // Удаляем токен и информацию о пользователе при 401 ошибке
       localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      
+      // Можно добавить редирект на страницу входа, если нужно
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
+      }
     }
     return Promise.reject(error);
   }
@@ -355,16 +431,180 @@ export function setupMockApi() {
   console.log('Mock API setup complete');
 }
 
+// ==== File: src/components/AuthModal.tsx ====
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { login, register } from '../api/authApi';
+
+interface AuthModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onLoginSuccess: () => void;
+}
+
+const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+
+    try {
+      if (isLoginMode) {
+        await login({ email, password });
+      } else {
+        if (password !== confirmPassword) {
+          throw new Error('Пароли не совпадают');
+        }
+        await register({ email, password, fullName });
+      }
+      onLoginSuccess();
+      onClose();
+      navigate('/');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Произошла ошибка');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold">
+            {isLoginMode ? 'Вход' : 'Регистрация'}
+          </h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+            &times;
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-2 bg-red-100 text-red-700 rounded text-sm">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          {!isLoginMode && (
+            <>
+              <div className="mb-4">
+                <label className="block text-gray-700 text-sm font-medium mb-1">
+                  ФИО
+                </label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  required
+                  placeholder="Иванов Иван Иванович"
+                />
+              </div>
+            </>
+          )}
+
+          <div className="mb-4">
+            <label className="block text-gray-700 text-sm font-medium mb-1">
+              Email
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              required
+              placeholder="example@mail.ru"
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-gray-700 text-sm font-medium mb-1">
+              Пароль
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              required
+              minLength={8}
+              placeholder="Не менее 8 символов"
+            />
+          </div>
+
+          {!isLoginMode && (
+            <div className="mb-6">
+              <label className="block text-gray-700 text-sm font-medium mb-1">
+                Подтверждение пароля
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                required
+                minLength={8}
+                placeholder="Повторите пароль"
+              />
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full bg-orange-500 text-white py-2 px-4 rounded-md hover:bg-orange-600 transition-colors disabled:bg-orange-300"
+          >
+            {isLoading ? 'Загрузка...' : isLoginMode ? 'Войти' : 'Зарегистрироваться'}
+          </button>
+        </form>
+
+        <div className="mt-4 text-center text-sm">
+          <button
+            onClick={() => {
+              setIsLoginMode(!isLoginMode);
+              setError('');
+              setPassword('');
+              setConfirmPassword('');
+            }}
+            className="text-orange-500 hover:text-orange-600"
+          >
+            {isLoginMode
+              ? 'Нет аккаунта? Зарегистрироваться'
+              : 'Уже есть аккаунт? Войти'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AuthModal;
+
 // ==== File: src/components/CourseCard.tsx ====
 import React from 'react';
 import { Link } from 'react-router-dom';
 import type { Course } from '../types/Course';
+import { useAuth } from '../hooks/useAuth';
 
 interface CourseCardProps {
   course: Course;
 }
 
 const CourseCard: React.FC<CourseCardProps> = ({ course }) => {
+  const { isAuthenticated } = useAuth();
+
   const getDifficultyLabel = (difficulty: string) => {
     switch (difficulty) {
       case 'Beginner':
@@ -379,56 +619,62 @@ const CourseCard: React.FC<CourseCardProps> = ({ course }) => {
   };
 
   return (
-    <Link to={`/courses/${course.id}`} className="block h-full">
-      <div className="card h-48 sm:h-56 bg-gray-300 relative overflow-hidden rounded-2xl">
-        {/* Фон */}
-        <img
-          src={course.coverUrl}
-          alt={course.title}
-          className="w-full h-full object-cover"
-        />
-        {/* Оверлей */}
-        <div className="absolute inset-0 bg-gray-500 opacity-30 rounded-2xl" />
-        {/* Контент */}
-        <div className="absolute inset-0 z-10 p-4 flex flex-col justify-between">
-          {/* Автор и заголовок */}
-          <div>
-            <div className="mb-1 text-xs text-white">{course.authorName}</div>
-            <h3 className="text-lg font-light leading-tight line-clamp-2 text-white">
-              {course.title}
-            </h3>
-          </div>
-          {/* Статистика */}
-          <div className="flex items-center space-x-6 text-white">
-            {/* Рейтинг */}
-            <div className="flex items-center">
-              <span className="text-yellow-400 mr-1 text-xs">★</span>
-              <span className="text-sm">{course.stats.avgScore.toFixed(1)}</span>
+    <div className="h-full">
+      <Link to={isAuthenticated ? `/courses/${course.id}` : '#'} className="block h-full">
+        <div className="card h-48 sm:h-56 bg-gray-300 relative overflow-hidden rounded-2xl">
+          {/* Фон */}
+          <img
+            src={course.coverUrl}
+            alt={course.title}
+            className="w-full h-full object-cover"
+          />
+          {/* Оверлей */}
+          <div className="absolute inset-0 bg-gray-500 opacity-30 rounded-2xl" />
+          {/* Контент */}
+          <div className="absolute inset-0 z-10 p-4 flex flex-col justify-between">
+            {/* Автор и заголовок */}
+            <div>
+              <div className="mb-1 text-xs text-white">{course.authorName}</div>
+              <h3 className="text-lg font-light leading-tight line-clamp-2 text-white">
+                {course.title}
+              </h3>
             </div>
-            {/* Длительность */}
-            <div className="flex items-center">
-              <svg className="w-3.5 h-3.5 text-green-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 8V12L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-              </svg>
-              <span className="text-sm">{course.estimatedDuration} ч</span>
-            </div>
-            {/* Уровень */}
-            <div className="flex items-center">
-              <svg className="w-3.5 h-3.5 text-blue-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <span className="text-sm">{getDifficultyLabel(course.difficulty)}</span>
+            {/* Статистика */}
+            <div className="flex items-center space-x-6 text-white">
+              {/* Рейтинг */}
+              <div className="flex items-center">
+                <span className="text-yellow-400 mr-1 text-xs">★</span>
+                <span className="text-sm">{course.stats.avgScore.toFixed(1)}</span>
+              </div>
+              {/* Длительность */}
+              <div className="flex items-center">
+                <svg className="w-3.5 h-3.5 text-green-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 8V12L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+                </svg>
+                <span className="text-sm">{course.estimatedDuration} ч</span>
+              </div>
+              {/* Уровень */}
+              <div className="flex items-center">
+                <svg className="w-3.5 h-3.5 text-blue-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <span className="text-sm">{getDifficultyLabel(course.difficulty)}</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </Link>
+      </Link>
+      {!isAuthenticated && (
+        <div className="mt-2 text-xs text-gray-500 text-center">
+          Войдите, чтобы просмотреть курс
+        </div>
+      )}
+    </div>
   );
 };
 
 export default CourseCard;
-
 
 // ==== File: src/components/CourseList.tsx ====
 import React from 'react';
@@ -616,101 +862,141 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 export default Layout;
 
 // ==== File: src/components/Navbar.tsx ====
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import AuthModal from './AuthModal';
+import { useAuth } from '../hooks/useAuth';
 
 const Navbar: React.FC = () => {
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const { user, logout } = useAuth();
+
   return (
-    <nav className="bg-white shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
-          <div className="flex items-center">
-            <NavLink to="/" className="flex-shrink-0 flex items-center">
-              <span className="text-2xl font-bold text-gray-900">AI-Hunt</span>
-            </NavLink>
-            <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
-              <NavLink
-                to="/"
-                className={({ isActive }) =>
-                  isActive
-                    ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
-                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
-                }
-              >
-                Курсы
+    <>
+      <nav className="bg-white shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center">
+              <NavLink to="/" className="flex-shrink-0 flex items-center">
+                <span className="text-2xl font-bold text-gray-900">AI-Hunt</span>
               </NavLink>
-              <NavLink
-                to="/features"
-                className={({ isActive }) =>
-                  isActive
-                    ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
-                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
-                }
+              <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
+                <NavLink
+                  to="/"
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                  }
+                >
+                  Курсы
+                </NavLink>
+                <NavLink
+                  to="/features"
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                  }
+                >
+                  Возможности
+                </NavLink>
+                <NavLink
+                  to="/about"
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                  }
+                >
+                  О нас
+                </NavLink>
+              </div>
+            </div>
+            <div className="hidden sm:ml-6 sm:flex sm:items-center">
+              {user ? (
+                <div className="flex items-center space-x-4">
+                  <span className="text-sm font-medium text-gray-700">
+                    {user.fullName}
+                  </span>
+                  <button
+                    onClick={logout}
+                    className="flex items-center text-gray-700 hover:text-orange-500 transition-colors focus:outline-none"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4 mr-1"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                      />
+                    </svg>
+                    <span className="text-sm font-medium">Выйти</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="flex items-center text-gray-700 hover:text-orange-500 transition-colors focus:outline-none"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4 mr-1"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5.121 17.804A13.937 13.937 0 0112 15c2.485 0 4.807.66 6.879 1.804M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                  <span className="text-sm font-medium">Войти</span>
+                </button>
+              )}
+            </div>
+            <div className="flex items-center sm:hidden">
+              <button
+                type="button"
+                className="inline-flex items-center justify-center p-1.5 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-orange-500"
+                aria-expanded="false"
               >
-                Возможности
-              </NavLink>
-              <NavLink
-                to="/about"
-                className={({ isActive }) =>
-                  isActive
-                    ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
-                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
-                }
-              >
-                О нас
-              </NavLink>
+                <span className="sr-only">Open main menu</span>
+                <svg
+                  className="block h-5 w-5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                  strokeWidth="2"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M4 6h16M4 12h16M4 18h16"
+                  />
+                </svg>
+              </button>
             </div>
           </div>
-          <div className="hidden sm:ml-6 sm:flex sm:items-center">
-            <button
-              type="button"
-              className="flex items-center text-gray-700 hover:text-orange-500 transition-colors focus:outline-none"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 mr-1"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5.121 17.804A13.937 13.937 0 0112 15c2.485 0 4.807.66 6.879 1.804M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
-              <span className="text-sm font-medium">Войти</span>
-            </button>
-          </div>
-          <div className="flex items-center sm:hidden">
-            {/* Mobile menu button */}
-            <button
-              type="button"
-              className="inline-flex items-center justify-center p-1.5 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-orange-500"
-              aria-expanded="false"
-            >
-              <span className="sr-only">Open main menu</span>
-              <svg
-                className="block h-5 w-5"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                aria-hidden="true"
-                strokeWidth="2"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4 6h16M4 12h16M4 18h16"
-                />
-              </svg>
-            </button>
-          </div>
         </div>
-      </div>
-    </nav>
+      </nav>
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onLoginSuccess={() => setIsAuthModalOpen(false)}
+      />
+    </>
   );
 };
 
@@ -774,6 +1060,54 @@ const SearchBar: React.FC<SearchBarProps> = ({
 };
 
 export default SearchBar;
+
+// ==== File: src/hooks/useAuth.ts ====
+import { useState, useEffect } from 'react';
+import { login, register, logout as apiLogout } from '../api/authApi';
+import type { User } from '../types/User';
+
+export function useAuth() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.error('Failed to parse user data', e);
+      }
+    }
+    setIsLoading(false);
+  }, []);
+
+  const handleLogin = async (email: string, password: string) => {
+    const userData = await login({ email, password });
+    setUser(userData);
+    return userData;
+  };
+
+  const handleRegister = async (email: string, password: string, fullName: string) => {
+    const userData = await register({ email, password, fullName });
+    setUser(userData);
+    return userData;
+  };
+
+  const handleLogout = () => {
+    apiLogout();
+    setUser(null);
+  };
+
+  return {
+    user,
+    isLoading,
+    login: handleLogin,
+    register: handleRegister,
+    logout: handleLogout,
+    isAuthenticated: !!user
+  };
+}
 
 // ==== File: src/hooks/useCourses.ts ====
 import { useState, useEffect } from 'react';
@@ -914,6 +1248,22 @@ export interface Course {
   estimatedDuration: number; // в часах
   stats: CourseStats;
   lessons: LessonSummary[];
+}
+
+// ==== File: src/types/User.ts ====
+export interface UserStats {
+  activeCourses: number;
+  completedCourses: number;
+  avgScore: number;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  avatarUrl: string | null;
+  role: string;
+  stats: UserStats;
 }
 
 // ==== File: src/vite-env.d.ts ====

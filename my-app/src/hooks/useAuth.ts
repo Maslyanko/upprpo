@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { login, register, logout as apiLogout } from '../api/authApi';
+import { login as apiLogin, register as apiRegister, logout as apiLogout } from '../api/authApi';
 import type { User } from '../types/User';
 
 export function useAuth() {
@@ -18,29 +18,44 @@ export function useAuth() {
     setIsLoading(false);
   }, []);
 
-  const handleLogin = async (email: string, password: string) => {
-    const userData = await login({ email, password });
+  // Функция для входа по email и паролю
+  const login = async (emailOrUser: string | User, password?: string): Promise<User> => {
+    // Если первый аргумент - объект User, то просто обновляем состояние
+    if (typeof emailOrUser === 'object') {
+      setUser(emailOrUser);
+      return emailOrUser;
+    }
+    
+    // Иначе выполняем вход с email и password
+    const userData = await apiLogin({ email: emailOrUser, password: password! });
     setUser(userData);
     return userData;
   };
 
-  const handleRegister = async (email: string, password: string, fullName: string) => {
-    const userData = await register({ email, password, fullName });
+  const register = async (email: string, password: string, fullName: string): Promise<User> => {
+    const userData = await apiRegister({ email, password, fullName });
     setUser(userData);
     return userData;
   };
 
-  const handleLogout = () => {
+  const logout = () => {
     apiLogout();
     setUser(null);
+  };
+
+  // Функция для обновления состояния пользователя (без API-запроса)
+  const updateUserState = (updatedUser: User) => {
+    setUser(updatedUser);
+    localStorage.setItem('user', JSON.stringify(updatedUser));
   };
 
   return {
     user,
     isLoading,
-    login: handleLogin,
-    register: handleRegister,
-    logout: handleLogout,
+    login,
+    register,
+    logout,
+    updateUserState,
     isAuthenticated: !!user
   };
 }

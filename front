@@ -1,0 +1,3343 @@
+// ==== File: bundle.js ====
+// ==== File: bundle.js ====
+
+
+// ==== File: eslint.config.js ====
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+
+export default tseslint.config(
+  { ignores: ['dist'] },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
+      ],
+    },
+  },
+)
+
+
+// ==== File: postcss.config.js ====
+export default {
+    plugins: {
+      tailwindcss: {},
+      autoprefixer: {},
+    },
+  }
+
+// ==== File: src/App.tsx ====
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Layout from './components/Layout';
+import CatalogPage from './pages/CatalogPage';
+import { useAuth } from './hooks/useAuth';
+
+// Placeholder pages that will be implemented later
+const FeaturesPage = () => <div className="py-12 text-center">Страница в разработке</div>;
+const AboutPage = () => <div className="py-12 text-center">Страница в разработке</div>;
+const NotFoundPage = () => (
+  <div className="py-12 text-center">
+    <h1 className="text-2xl font-bold mb-4">404 - Страница не найдена</h1>
+    <p className="mb-6">Запрашиваемая страница не существует.</p>
+    <a href="/" className="text-orange-500 hover:text-orange-600">Вернуться на главную</a>
+  </div>
+);
+
+export default function App() {
+  const { isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
+      </div>
+    );
+  }
+
+  return (
+    <BrowserRouter>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<CatalogPage />} />
+          <Route path="/features" element={<FeaturesPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </Layout>
+    </BrowserRouter>
+  );
+}
+
+// ==== File: src/api/authApi.ts ====
+import client from './client';
+import type { User } from '../types/User';
+
+interface LoginData {
+  email: string;
+  password: string;
+}
+
+interface RegisterData {
+  email: string;
+  password: string;
+  fullName: string;
+}
+
+export async function login(data: LoginData): Promise<User> {
+  const response = await client.post('/auth/login', data);
+  const { accessToken } = response.data;
+  localStorage.setItem('token', accessToken);
+  
+  // Получаем информацию о пользователе
+  const userResponse = await client.get('/users/me');
+  localStorage.setItem('user', JSON.stringify(userResponse.data));
+  
+  return userResponse.data;
+}
+
+export async function register(data: RegisterData): Promise<User> {
+  // Сначала регистрируем пользователя
+  await client.post('/auth/register', {
+    email: data.email,
+    password: data.password
+  });
+
+  // Затем выполняем вход
+  const loginResponse = await client.post('/auth/login', {
+    email: data.email,
+    password: data.password
+  });
+  
+  const { accessToken } = loginResponse.data;
+  localStorage.setItem('token', accessToken);
+
+  // Обновляем профиль с ФИО
+  const userResponse = await client.patch('/users/me', {
+    fullName: data.fullName
+  });
+  
+  localStorage.setItem('user', JSON.stringify(userResponse.data));
+  return userResponse.data;
+}
+
+export function logout() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+}
+
+// ==== File: src/api/client.ts ====
+import axios from 'axios';
+
+const client = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'https://api.offer-hunt.com/v1',
+  headers: { 'Content-Type': 'application/json' },
+});
+
+client.interceptors.request.use(config => {
+  const token = localStorage.getItem('token');
+  if (token) config.headers['Authorization'] = `Bearer ${token}`;
+  return config;
+});
+
+client.interceptors.response.use(
+  response => response,
+  error => {
+    if (error.response?.status === 401) {
+      // Удаляем токен и информацию о пользователе при 401 ошибке
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      
+      // Можно добавить редирект на страницу входа, если нужно
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+export default client;
+
+// ==== File: src/api/coursesApi.ts ====
+import client from './client';
+import type { Course } from '../types/Course';
+import { mockCourses } from './mockData';
+
+// Use this flag to switch between mock data and real API
+const USE_MOCK_DATA = true;
+
+interface CourseParams {
+  search?: string;
+  sort?: 'popularity' | 'difficulty' | 'duration';
+  level?: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+  tags?: string[];
+}
+
+export async function getCourses(params?: CourseParams): Promise<Course[]> {
+  if (USE_MOCK_DATA) {
+    return new Promise((resolve) => {
+      // Simulate network delay
+      setTimeout(() => {
+        let filteredCourses = [...mockCourses];
+        
+        // Apply filters
+        if (params?.search) {
+          const searchLower = params.search.toLowerCase();
+          filteredCourses = filteredCourses.filter(
+            course => 
+              course.title.toLowerCase().includes(searchLower) || 
+              course.authorName.toLowerCase().includes(searchLower) ||
+              course.tags.some(tag => tag.toLowerCase().includes(searchLower))
+          );
+        }
+        
+        if (params?.level) {
+          filteredCourses = filteredCourses.filter(
+            course => course.difficulty === params.level
+          );
+        }
+        
+        if (params?.language) {
+          filteredCourses = filteredCourses.filter(
+            course => course.language === params.language
+          );
+        }
+        
+        // Apply sorting
+        if (params?.sort) {
+          switch (params.sort) {
+            case 'popularity':
+              filteredCourses = filteredCourses.sort(
+                (a, b) => b.stats.enrollments - a.stats.enrollments
+              );
+              break;
+            case 'difficulty':
+              // Sort by difficulty level (Beginner → Middle → Senior)
+              const difficultyOrder = { 'Beginner': 1, 'Middle': 2, 'Senior': 3 };
+              filteredCourses = filteredCourses.sort(
+                (a, b) => difficultyOrder[a.difficulty] - difficultyOrder[b.difficulty]
+              );
+              break;
+            case 'duration':
+              filteredCourses = filteredCourses.sort(
+                (a, b) => b.estimatedDuration - a.estimatedDuration
+              );
+              break;
+          }
+        }
+        
+        resolve(filteredCourses);
+      }, 600); // Simulate a short delay
+    });
+  } else {
+    // Real API call
+    const response = await client.get<Course[]>('/courses', { params });
+    return response.data;
+  }
+}
+
+export async function getCourseById(id: string): Promise<Course> {
+  if (USE_MOCK_DATA) {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        const course = mockCourses.find(c => c.id === id);
+        if (course) {
+          resolve(course);
+        } else {
+          reject(new Error('Course not found'));
+        }
+      }, 300);
+    });
+  } else {
+    const response = await client.get<Course>(`/courses/${id}`);
+    return response.data;
+  }
+}
+
+export async function enrollCourse(courseId: string) {
+  if (USE_MOCK_DATA) {
+    return new Promise(resolve => {
+      setTimeout(() => {
+        resolve({ success: true, courseId });
+      }, 500);
+    });
+  } else {
+    const response = await client.post(`/courses/${courseId}/enroll`);
+    return response.data;
+  }
+}
+
+export async function rateCourse(courseId: string, value: number) {
+  if (USE_MOCK_DATA) {
+    return new Promise(resolve => {
+      setTimeout(() => {
+        resolve({ success: true, courseId, value });
+      }, 500);
+    });
+  } else {
+    const response = await client.post(`/courses/${courseId}/rating`, { value });
+    return response.data;
+  }
+}
+
+// ==== File: src/api/mockData.ts ====
+// This file provides mock data for development until the actual API is connected
+import { Course } from '../types/Course';
+
+export const mockCourses: Course[] = [
+  {
+    id: '1',
+    authorName: 'Иван Иванов',
+    coverUrl: '/images/courses/python.png',
+    title: 'Подготовка к Python Middle собеседованию',
+    difficulty: 'Middle',
+    language: 'Python',
+    tags: ['Python', 'Backend', 'Algorithms'],
+    estimatedDuration: 20,
+    stats: {
+      enrollments: 156,
+      avgCompletion: 73,
+      avgScore: 4.9
+    },
+    lessons: [
+      { id: '101', title: 'Основы Python', type: 'Theory', hasQuiz: true },
+      { id: '102', title: 'Структуры данных', type: 'Theory', hasQuiz: true },
+      { id: '103', title: 'Алгоритмы', type: 'Coding', hasQuiz: true }
+    ]
+  },
+  {
+    id: '2',
+    authorName: 'Полина Смирнова',
+    coverUrl: '/images/courses/algos.png',
+    title: 'Алгоритмы и структуры данных для собеседований',
+    difficulty: 'Middle',
+    language: 'JavaScript',
+    tags: ['Algorithms', 'Data Structures', 'Leetcode'],
+    estimatedDuration: 15,
+    stats: {
+      enrollments: 243,
+      avgCompletion: 68,
+      avgScore: 4.8
+    },
+    lessons: [
+      { id: '201', title: 'Сложность алгоритмов', type: 'Theory', hasQuiz: true },
+      { id: '202', title: 'Сортировки', type: 'Coding', hasQuiz: true },
+      { id: '203', title: 'Деревья и графы', type: 'Theory', hasQuiz: true }
+    ]
+  },
+  {
+    id: '3',
+    authorName: 'Петр Петров',
+    coverUrl: '/images/courses/anal.png',
+    title: 'Интервью аналитика: SQL, Excel, кейсы',
+    difficulty: 'Beginner',
+    language: 'SQL',
+    tags: ['SQL', 'Analytics', 'Excel'],
+    estimatedDuration: 12,
+    stats: {
+      enrollments: 189,
+      avgCompletion: 82,
+      avgScore: 4.8
+    },
+    lessons: [
+      { id: '301', title: 'Основы SQL', type: 'Theory', hasQuiz: true },
+      { id: '302', title: 'Сложные запросы', type: 'Coding', hasQuiz: true },
+      { id: '303', title: 'Аналитические кейсы', type: 'Theory', hasQuiz: false }
+    ]
+  },
+  {
+    id: '4',
+    authorName: 'Василий Васильев',
+    coverUrl: '/images/courses/softs.png',
+    title: 'Расскажи о себе: soft skills на собеседовании',
+    difficulty: 'Beginner',
+    language: 'Русский',
+    tags: ['Soft skills', 'HR', 'Interview'],
+    estimatedDuration: 8,
+    stats: {
+      enrollments: 315,
+      avgCompletion: 91,
+      avgScore: 5.0
+    },
+    lessons: [
+      { id: '401', title: 'Самопрезентация', type: 'Theory', hasQuiz: true },
+      { id: '402', title: 'Сложные вопросы', type: 'Theory', hasQuiz: true },
+      { id: '403', title: 'Обратная связь', type: 'Theory', hasQuiz: false }
+    ]
+  },
+  {
+    id: '5',
+    authorName: 'Александра Александрова',
+    coverUrl: '/images/courses/sysdis.png',
+    title: 'System Design для Senior',
+    difficulty: 'Senior',
+    language: 'English',
+    tags: ['System Design', 'Architecture', 'Senior'],
+    estimatedDuration: 25,
+    stats: {
+      enrollments: 142,
+      avgCompletion: 62,
+      avgScore: 4.7
+    },
+    lessons: [
+      { id: '501', title: 'Основы системного дизайна', type: 'Theory', hasQuiz: true },
+      { id: '502', title: 'Масштабирование', type: 'Theory', hasQuiz: true },
+      { id: '503', title: 'Практические кейсы', type: 'Coding', hasQuiz: true }
+    ]
+  },
+  {
+    id: '6',
+    authorName: 'Андрей Андреев',
+    coverUrl: '/images/courses/js.png',
+    title: 'JavaScript для Junior Frontend',
+    difficulty: 'Beginner',
+    language: 'JavaScript',
+    tags: ['JavaScript', 'Frontend', 'Web'],
+    estimatedDuration: 18,
+    stats: {
+      enrollments: 278,
+      avgCompletion: 76,
+      avgScore: 5.0
+    },
+    lessons: [
+      { id: '601', title: 'Основы JavaScript', type: 'Theory', hasQuiz: true },
+      { id: '602', title: 'DOM манипуляции', type: 'Theory', hasQuiz: true },
+      { id: '603', title: 'Асинхронный JavaScript', type: 'Coding', hasQuiz: true }
+    ]
+  }
+];
+
+// Modify the coursesApi.ts file to use mock data
+// You'll replace this with actual API calls later
+
+export function setupMockApi() {
+  // You can intercept axios here if needed
+  console.log('Mock API setup complete');
+}
+
+// ==== File: src/components/AuthModal.tsx ====
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { login, register } from '../api/authApi';
+
+interface AuthModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onLoginSuccess: () => void;
+}
+
+const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+
+    try {
+      if (isLoginMode) {
+        await login({ email, password });
+      } else {
+        if (password !== confirmPassword) {
+          throw new Error('Пароли не совпадают');
+        }
+        await register({ email, password, fullName });
+      }
+      onLoginSuccess();
+      onClose();
+      navigate('/');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Произошла ошибка');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold">
+            {isLoginMode ? 'Вход' : 'Регистрация'}
+          </h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+            &times;
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-2 bg-red-100 text-red-700 rounded text-sm">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          {!isLoginMode && (
+            <>
+              <div className="mb-4">
+                <label className="block text-gray-700 text-sm font-medium mb-1">
+                  ФИО
+                </label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  required
+                  placeholder="Иванов Иван Иванович"
+                />
+              </div>
+            </>
+          )}
+
+          <div className="mb-4">
+            <label className="block text-gray-700 text-sm font-medium mb-1">
+              Email
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              required
+              placeholder="example@mail.ru"
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-gray-700 text-sm font-medium mb-1">
+              Пароль
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              required
+              minLength={8}
+              placeholder="Не менее 8 символов"
+            />
+          </div>
+
+          {!isLoginMode && (
+            <div className="mb-6">
+              <label className="block text-gray-700 text-sm font-medium mb-1">
+                Подтверждение пароля
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                required
+                minLength={8}
+                placeholder="Повторите пароль"
+              />
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full bg-orange-500 text-white py-2 px-4 rounded-md hover:bg-orange-600 transition-colors disabled:bg-orange-300"
+          >
+            {isLoading ? 'Загрузка...' : isLoginMode ? 'Войти' : 'Зарегистрироваться'}
+          </button>
+        </form>
+
+        <div className="mt-4 text-center text-sm">
+          <button
+            onClick={() => {
+              setIsLoginMode(!isLoginMode);
+              setError('');
+              setPassword('');
+              setConfirmPassword('');
+            }}
+            className="text-orange-500 hover:text-orange-600"
+          >
+            {isLoginMode
+              ? 'Нет аккаунта? Зарегистрироваться'
+              : 'Уже есть аккаунт? Войти'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AuthModal;
+
+// ==== File: src/components/CourseCard.tsx ====
+import React from 'react';
+import { Link } from 'react-router-dom';
+import type { Course } from '../types/Course';
+import { useAuth } from '../hooks/useAuth';
+
+interface CourseCardProps {
+  course: Course;
+}
+
+const CourseCard: React.FC<CourseCardProps> = ({ course }) => {
+  const { isAuthenticated } = useAuth();
+
+  const getDifficultyLabel = (difficulty: string) => {
+    switch (difficulty) {
+      case 'Beginner':
+        return 'Для начинающих';
+      case 'Middle':
+        return 'Средний уровень';
+      case 'Senior':
+        return 'Продвинутый уровень';
+      default:
+        return difficulty;
+    }
+  };
+
+  return (
+    <div className="h-full">
+      <Link to={isAuthenticated ? `/courses/${course.id}` : '#'} className="block h-full">
+        <div className="card h-48 sm:h-56 bg-gray-300 relative overflow-hidden rounded-2xl">
+          {/* Фон */}
+          <img
+            src={course.coverUrl}
+            alt={course.title}
+            className="w-full h-full object-cover"
+          />
+          {/* Оверлей */}
+          <div className="absolute inset-0 bg-gray-500 opacity-30 rounded-2xl" />
+          {/* Контент */}
+          <div className="absolute inset-0 z-10 p-4 flex flex-col justify-between">
+            {/* Автор и заголовок */}
+            <div>
+              <div className="mb-1 text-xs text-white">{course.authorName}</div>
+              <h3 className="text-lg font-light leading-tight line-clamp-2 text-white">
+                {course.title}
+              </h3>
+            </div>
+            {/* Статистика */}
+            <div className="flex items-center space-x-6 text-white">
+              {/* Рейтинг */}
+              <div className="flex items-center">
+                <span className="text-yellow-400 mr-1 text-xs">★</span>
+                <span className="text-sm">{course.stats.avgScore.toFixed(1)}</span>
+              </div>
+              {/* Длительность */}
+              <div className="flex items-center">
+                <svg className="w-3.5 h-3.5 text-green-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 8V12L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+                </svg>
+                <span className="text-sm">{course.estimatedDuration} ч</span>
+              </div>
+              {/* Уровень */}
+              <div className="flex items-center">
+                <svg className="w-3.5 h-3.5 text-blue-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <span className="text-sm">{getDifficultyLabel(course.difficulty)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Link>
+      {!isAuthenticated && (
+        <div className="mt-2 text-xs text-gray-500 text-center">
+          Войдите, чтобы просмотреть курс
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default CourseCard;
+
+// ==== File: src/components/CourseList.tsx ====
+import React from 'react';
+import type { Course } from '../types/Course';
+import CourseCard from './CourseCard';
+
+interface CourseListProps {
+  courses: Course[];
+  loading?: boolean;
+  error?: Error | null;
+}
+
+const CourseList: React.FC<CourseListProps> = ({ 
+  courses, 
+  loading = false, 
+  error = null 
+}) => {
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-16">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-orange-500"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-red-500 mb-2">Произошла ошибка при загрузке курсов</div>
+        <div className="text-gray-500 text-sm">{error.message}</div>
+        <button 
+          onClick={() => window.location.reload()}
+          className="mt-4 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+        >
+          Попробовать снова
+        </button>
+      </div>
+    );
+  }
+
+  if (courses.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-gray-500 mb-2">Курсы не найдены</div>
+        <div className="text-gray-400 text-sm">Попробуйте изменить параметры поиска</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {courses.map(course => (
+        <CourseCard key={course.id} course={course} />
+      ))}
+    </div>
+  );
+};
+
+export default CourseList;
+
+// ==== File: src/components/Filters.tsx ====
+import React from 'react';
+
+interface FiltersProps {
+  onChange: (filters: { sort?: 'popularity' | 'difficulty' | 'duration'; level?: string; language?: string }) => void;
+}
+
+const Filters: React.FC<FiltersProps> = ({ onChange }) => {
+  const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onChange({ sort: e.target.value as 'popularity' | 'difficulty' | 'duration' });
+  };
+
+  const handleLevelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onChange({ level: e.target.value });
+  };
+
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onChange({ language: e.target.value });
+  };
+
+  return (
+    <div className="flex flex-wrap gap-2 items-center">
+      {/* Сортировка */}
+      <div className="relative">
+        <select
+          onChange={handleSortChange}
+          defaultValue="popularity"
+          className="select-filter select-primary rounded-md appearance-none pr-6 pl-3 py-1.5 text-sm"
+        >
+          <option value="popularity">Сначала: Популярное</option>
+          <option value="difficulty">Сначала: Сложность</option>
+          <option value="duration">Сначала: Длительность</option>
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-white">
+          <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+
+      {/* Уровень */}
+      <div className="relative">
+        <select
+          onChange={handleLevelChange}
+          defaultValue=""
+          className="select-filter select-dark rounded-md appearance-none pr-6 pl-3 py-1.5 text-sm"
+        >
+          <option value="">Уровень</option>
+          <option value="Beginner">Beginner</option>
+          <option value="Middle">Middle</option>
+          <option value="Senior">Senior</option>
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-white">
+          <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+
+      {/* Язык */}
+      <div className="relative">
+        <select
+          onChange={handleLanguageChange}
+          defaultValue=""
+          className="select-filter select-dark rounded-md appearance-none pr-6 pl-3 py-1.5 text-sm"
+        >
+          <option value="">Язык</option>
+          <option value="JavaScript">JavaScript</option>
+          <option value="Python">Python</option>
+          <option value="SQL">SQL</option>
+          <option value="Java">Java</option>
+          <option value="C++">C++</option>
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-white">
+          <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Filters;
+
+
+// ==== File: src/components/Layout.tsx ====
+import React from 'react';
+import Navbar from './Navbar';
+
+interface LayoutProps {
+  children: React.ReactNode;
+}
+
+const Layout: React.FC<LayoutProps> = ({ children }) => {
+  return (
+    <div className="min-h-screen flex flex-col bg-gray-50">
+      <Navbar />
+      <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {children}
+      </main>
+      <footer className="bg-white border-t border-gray-200 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center text-gray-500 text-sm">
+            © {new Date().getFullYear()} AI-Hunt. Все права защищены.
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default Layout;
+
+// ==== File: src/components/Navbar.tsx ====
+import React, { useState } from 'react';
+import { NavLink } from 'react-router-dom';
+import AuthModal from './AuthModal';
+import { useAuth } from '../hooks/useAuth';
+
+const Navbar: React.FC = () => {
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const { user, logout } = useAuth();
+
+  return (
+    <>
+      <nav className="bg-white shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center">
+              <NavLink to="/" className="flex-shrink-0 flex items-center">
+                <span className="text-2xl font-bold text-gray-900">AI-Hunt</span>
+              </NavLink>
+              <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
+                <NavLink
+                  to="/"
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                  }
+                >
+                  Курсы
+                </NavLink>
+                <NavLink
+                  to="/features"
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                  }
+                >
+                  Возможности
+                </NavLink>
+                <NavLink
+                  to="/about"
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                  }
+                >
+                  О нас
+                </NavLink>
+              </div>
+            </div>
+            <div className="hidden sm:ml-6 sm:flex sm:items-center">
+              {user ? (
+                <div className="flex items-center space-x-4">
+                  <span className="text-sm font-medium text-gray-700">
+                    {user.fullName}
+                  </span>
+                  <button
+                    onClick={logout}
+                    className="flex items-center text-gray-700 hover:text-orange-500 transition-colors focus:outline-none"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4 mr-1"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                      />
+                    </svg>
+                    <span className="text-sm font-medium">Выйти</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="flex items-center text-gray-700 hover:text-orange-500 transition-colors focus:outline-none"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4 mr-1"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5.121 17.804A13.937 13.937 0 0112 15c2.485 0 4.807.66 6.879 1.804M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                  <span className="text-sm font-medium">Войти</span>
+                </button>
+              )}
+            </div>
+            <div className="flex items-center sm:hidden">
+              <button
+                type="button"
+                className="inline-flex items-center justify-center p-1.5 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-orange-500"
+                aria-expanded="false"
+              >
+                <span className="sr-only">Open main menu</span>
+                <svg
+                  className="block h-5 w-5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                  strokeWidth="2"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M4 6h16M4 12h16M4 18h16"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onLoginSuccess={() => setIsAuthModalOpen(false)}
+      />
+    </>
+  );
+};
+
+export default Navbar;
+
+// ==== File: src/components/SearchBar.tsx ====
+import React, { useState } from 'react';
+
+interface SearchBarProps {
+  onSearch: (query: string) => void;
+  placeholder?: string;
+}
+
+const SearchBar: React.FC<SearchBarProps> = ({ 
+  onSearch, 
+  placeholder = 'Поиск' 
+}) => {
+  const [query, setQuery] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSearch(query);
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      onSearch(query);
+    }
+  };
+
+  return (
+    <div className="relative flex-1 max-w-lg">
+      <form onSubmit={handleSubmit}>
+        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+          <svg 
+            className="w-3 h-3 text-gray-400" 
+            xmlns="http://www.w3.org/2000/svg" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" 
+            />
+          </svg>
+        </div>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyPress={handleKeyPress}
+          placeholder={placeholder}
+          className="w-full pl-8 pr-4 py-2 rounded-lg bg-gray-100 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+        />
+      </form>
+    </div>
+  );
+};
+
+export default SearchBar;
+
+// ==== File: src/hooks/useAuth.ts ====
+import { useState, useEffect } from 'react';
+import { login, register, logout as apiLogout } from '../api/authApi';
+import type { User } from '../types/User';
+
+export function useAuth() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.error('Failed to parse user data', e);
+      }
+    }
+    setIsLoading(false);
+  }, []);
+
+  const handleLogin = async (email: string, password: string) => {
+    const userData = await login({ email, password });
+    setUser(userData);
+    return userData;
+  };
+
+  const handleRegister = async (email: string, password: string, fullName: string) => {
+    const userData = await register({ email, password, fullName });
+    setUser(userData);
+    return userData;
+  };
+
+  const handleLogout = () => {
+    apiLogout();
+    setUser(null);
+  };
+
+  return {
+    user,
+    isLoading,
+    login: handleLogin,
+    register: handleRegister,
+    logout: handleLogout,
+    isAuthenticated: !!user
+  };
+}
+
+// ==== File: src/hooks/useCourses.ts ====
+import { useState, useEffect } from 'react';
+import { getCourses } from '../api/coursesApi';
+import type { Course } from '../types/Course';
+
+interface CourseFilters {
+  search?: string;
+  sort?: 'popularity' | 'difficulty' | 'duration';
+  level?: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+}
+
+export function useCourses() {
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const [filters, setFilters] = useState<CourseFilters>({
+    sort: 'popularity'
+  });
+
+  const fetchCourses = async (newFilters?: Partial<CourseFilters>) => {
+    const updatedFilters = { ...filters, ...newFilters };
+    setFilters(updatedFilters);
+    
+    setLoading(true);
+    try {
+      const data = await getCourses(updatedFilters);
+      setCourses(data);
+      setError(null);
+    } catch (e) {
+      setError(e as Error);
+      setCourses([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial fetch on mount
+  useEffect(() => {
+    fetchCourses();
+  }, []);
+
+  return { 
+    courses, 
+    loading, 
+    error, 
+    filters,
+    fetchCourses 
+  };
+}
+
+// ==== File: src/index.tsx ====
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import './styles/globals.css';
+
+createRoot(document.getElementById('root')!).render(<App />);
+
+
+// ==== File: src/main.tsx ====
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import './styles/globals.css'
+import App from './App'
+
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+
+// ==== File: src/pages/CatalogPage.tsx ====
+import React, { useEffect } from 'react';
+import SearchBar from '../components/SearchBar';
+import Filters from '../components/Filters';
+import CourseList from '../components/CourseList';
+import { useCourses } from '../hooks/useCourses';
+
+const CatalogPage: React.FC = () => {
+  const { courses, loading, error, fetchCourses } = useCourses();
+
+  useEffect(() => {
+    document.title = 'Каталог курсов - AI-Hunt';
+  }, []);
+
+  const handleSearch = (query: string) => {
+    fetchCourses({ search: query });
+  };
+
+  const handleFilterChange = (filters: { sort?: string; level?: string; language?: string }) => {
+    fetchCourses(filters);
+  };
+
+  return (
+    <div>
+      <h1 className="text-3xl font-bold text-gray-900 mb-8">Каталог курсов</h1>
+      
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-8">
+        <SearchBar onSearch={handleSearch} placeholder="Поиск курсов..." />
+        <Filters onChange={handleFilterChange} />
+      </div>
+
+      <CourseList 
+        courses={courses} 
+        loading={loading} 
+        error={error} 
+      />
+    </div>
+  );
+};
+
+export default CatalogPage;
+
+// ==== File: src/types/Course.ts ====
+export interface LessonSummary {
+  id: string;
+  title: string;
+  type: 'Theory' | 'Coding';
+  hasQuiz: boolean;
+}
+
+export interface CourseStats {
+  enrollments: number;
+  avgCompletion: number;
+  avgScore: number;
+}
+
+export interface Course {
+  id: string;
+  authorName: string;
+  coverUrl: string;
+  title: string;
+  difficulty: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+  tags: string[];
+  estimatedDuration: number; // в часах
+  stats: CourseStats;
+  lessons: LessonSummary[];
+}
+
+// ==== File: src/types/User.ts ====
+export interface UserStats {
+  activeCourses: number;
+  completedCourses: number;
+  avgScore: number;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  avatarUrl: string | null;
+  role: string;
+  stats: UserStats;
+}
+
+// ==== File: src/vite-env.d.ts ====
+/// <reference types="vite/client" />
+
+
+// ==== File: tailwind.config.js ====
+/** @type {import('tailwindcss').Config} */
+export default {
+    content: [
+      "./index.html",
+      "./src/**/*.{js,ts,jsx,tsx}",
+    ],
+    theme: {
+      extend: {
+        colors: {
+          orange: {
+            DEFAULT: '#e85d04',
+            50: '#fff7ed',
+            100: '#ffedd5',
+            200: '#fed7aa',
+            300: '#fdba74',
+            400: '#fb923c',
+            500: '#f97316',
+            600: '#ea580c',
+            700: '#c2410c',
+            800: '#9a3412',
+            900: '#7c2d12',
+            950: '#431407',
+          },
+        },
+        boxShadow: {
+          card: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+        },
+        fontFamily: {
+          sans: [
+            'Inter',
+            'system-ui',
+            '-apple-system',
+            'BlinkMacSystemFont',
+            '"Segoe UI"',
+            'Roboto',
+            '"Helvetica Neue"',
+            'Arial',
+            'sans-serif',
+          ],
+        },
+      },
+    },
+    plugins: [
+      require('@tailwindcss/line-clamp'),
+    ],
+  }
+
+// ==== File: vite.config.ts ====
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'url'
+import { dirname, resolve } from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    port: 3000,
+    open: true,
+  },
+})
+
+
+
+// ==== File: eslint.config.js ====
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+
+export default tseslint.config(
+  { ignores: ['dist'] },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
+      ],
+    },
+  },
+)
+
+
+// ==== File: postcss.config.js ====
+export default {
+    plugins: {
+      tailwindcss: {},
+      autoprefixer: {},
+    },
+  }
+
+// ==== File: src/App.tsx ====
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Layout from './components/Layout';
+import CatalogPage from './pages/CatalogPage';
+import ProfilePage from './pages/ProfilePage'; // Добавляем импорт новой страницы
+import { useAuth } from './hooks/useAuth';
+
+// Placeholder pages that will be implemented later
+const FeaturesPage = () => <div className="py-12 text-center">Страница в разработке</div>;
+const AboutPage = () => <div className="py-12 text-center">Страница в разработке</div>;
+const CreateCoursePage = () => <div className="py-12 text-center">Страница создания курса в разработке</div>; // Заглушка для страницы создания курса
+const NotFoundPage = () => (
+  <div className="py-12 text-center">
+    <h1 className="text-2xl font-bold mb-4">404 - Страница не найдена</h1>
+    <p className="mb-6">Запрашиваемая страница не существует.</p>
+    <a href="/" className="text-orange-500 hover:text-orange-600">Вернуться на главную</a>
+  </div>
+);
+
+export default function App() {
+  const { isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
+      </div>
+    );
+  }
+
+  return (
+    <BrowserRouter>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<CatalogPage />} />
+          <Route path="/features" element={<FeaturesPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/profile" element={<ProfilePage />} /> {/* Добавляем маршрут для профиля */}
+          <Route path="/create-course" element={<CreateCoursePage />} /> {/* Добавляем маршрут для создания курса */}
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </Layout>
+    </BrowserRouter>
+  );
+}
+
+// ==== File: src/api/authApi.ts ====
+import client from './client';
+import type { User } from '../types/User';
+
+interface LoginData {
+  email: string;
+  password: string;
+}
+
+interface RegisterData {
+  email: string;
+  password: string;
+  fullName: string;
+}
+
+interface AuthTokenResponse {
+  accessToken: string;
+}
+
+export async function login(data: LoginData): Promise<User> {
+  // Получаем токен
+  const response = await client.post<AuthTokenResponse>('/auth/login', data);
+  const { accessToken } = response.data;
+  localStorage.setItem('token', accessToken);
+  
+  // Получаем информацию о пользователе
+  const userResponse = await client.get<User>('/users/me');
+  localStorage.setItem('user', JSON.stringify(userResponse.data));
+  
+  return userResponse.data;
+}
+
+export async function register(data: RegisterData): Promise<User> {
+  // Регистрируем пользователя
+  await client.post('/auth/register', {
+    email: data.email,
+    password: data.password,
+    fullName: data.fullName
+  });
+
+  // Затем выполняем вход
+  const loginResponse = await client.post<AuthTokenResponse>('/auth/login', {
+    email: data.email,
+    password: data.password
+  });
+  
+  const { accessToken } = loginResponse.data;
+  localStorage.setItem('token', accessToken);
+
+  // Обновляем профиль с ФИО
+  const userResponse = await client.patch<User>('/users/me', {
+    fullName: data.fullName
+  });
+  
+  localStorage.setItem('user', JSON.stringify(userResponse.data));
+  return userResponse.data;
+}
+
+export function logout() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+}
+
+// ==== File: src/api/client.ts ====
+import axios from 'axios';
+
+const client = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/v1', // Изменена базовая URL
+  headers: { 'Content-Type': 'application/json' },
+});
+
+client.interceptors.request.use(config => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    console.log('Request with token:', config.url);
+    config.headers['Authorization'] = `Bearer ${token}`;
+  } else {
+    console.log('Request without token:', config.url);
+  }
+  return config;
+});
+
+client.interceptors.response.use(
+  response => {
+    console.log('Response success:', response.config.url);
+    return response;
+  },
+  error => {
+    console.error('Response error:', error.config?.url, error.response?.status, error.message);
+    if (error.response?.status === 401) {
+      // Удаляем токен и информацию о пользователе при 401 ошибке
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      
+      // Можно добавить редирект на страницу входа, если нужно
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+export default client;
+
+// ==== File: src/api/coursesApi.ts ====
+import client from './client';
+import type { Course } from '../types/Course';
+
+// Изменить на false для использования настоящего API
+const USE_MOCK_DATA = false; 
+
+interface CourseParams {
+  search?: string;
+  sort?: 'popularity' | 'difficulty' | 'duration';
+  level?: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+  tags?: string[];
+}
+
+export async function getCourses(params?: CourseParams): Promise<Course[]> {
+  if (USE_MOCK_DATA) {
+    // Здесь оставим мок-реализацию для возможности разработки без бэкенда
+    const { mockCourses } = await import('./mockData');
+    
+    return new Promise((resolve) => {
+      // Simulate network delay
+      setTimeout(() => {
+        let filteredCourses = [...mockCourses];
+        
+        // Apply filters
+        if (params?.search) {
+          const searchLower = params.search.toLowerCase();
+          filteredCourses = filteredCourses.filter(
+            course => 
+              course.title.toLowerCase().includes(searchLower) || 
+              course.authorName.toLowerCase().includes(searchLower) ||
+              course.tags.some(tag => tag.toLowerCase().includes(searchLower))
+          );
+        }
+        
+        if (params?.level) {
+          filteredCourses = filteredCourses.filter(
+            course => course.difficulty === params.level
+          );
+        }
+        
+        if (params?.language) {
+          filteredCourses = filteredCourses.filter(
+            course => course.language === params.language
+          );
+        }
+        
+        // Apply sorting
+        if (params?.sort) {
+          switch (params.sort) {
+            case 'popularity':
+              filteredCourses = filteredCourses.sort(
+                (a, b) => b.stats.enrollments - a.stats.enrollments
+              );
+              break;
+            case 'difficulty':
+              // Sort by difficulty level (Beginner → Middle → Senior)
+              const difficultyOrder = { 'Beginner': 1, 'Middle': 2, 'Senior': 3 };
+              filteredCourses = filteredCourses.sort(
+                (a, b) => difficultyOrder[a.difficulty] - difficultyOrder[b.difficulty]
+              );
+              break;
+            case 'duration':
+              filteredCourses = filteredCourses.sort(
+                (a, b) => b.estimatedDuration - a.estimatedDuration
+              );
+              break;
+          }
+        }
+        
+        resolve(filteredCourses);
+      }, 600); // Simulate a short delay
+    });
+  } else {
+    // Real API call
+    const apiParams: Record<string, string | string[]> = {};
+    
+    // Map frontend params to API params
+    if (params?.search) apiParams.search = params.search;
+    if (params?.sort) apiParams.sort = params.sort;
+    if (params?.level) apiParams.difficulty = params.level; // Изменено на difficulty согласно API
+    if (params?.language) apiParams.language = params.language;
+    if (params?.tags) apiParams.tags = params.tags;
+    
+    const response = await client.get<Course[]>('/courses', { params: apiParams });
+    return response.data;
+  }
+}
+
+export async function getCourseById(id: string): Promise<Course> {
+  if (USE_MOCK_DATA) {
+    const { mockCourses } = await import('./mockData');
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        const course = mockCourses.find(c => c.id === id);
+        if (course) {
+          resolve(course);
+        } else {
+          reject(new Error('Course not found'));
+        }
+      }, 300);
+    });
+  } else {
+    const response = await client.get<Course>(`/courses/${id}`);
+    return response.data;
+  }
+}
+
+export async function enrollCourse(courseId: string) {
+  if (USE_MOCK_DATA) {
+    return new Promise(resolve => {
+      setTimeout(() => {
+        resolve({ success: true, courseId });
+      }, 500);
+    });
+  } else {
+    const response = await client.post(`/courses/${courseId}/enroll`);
+    return response.data;
+  }
+}
+
+export async function rateCourse(courseId: string, value: number) {
+  if (USE_MOCK_DATA) {
+    return new Promise(resolve => {
+      setTimeout(() => {
+        resolve({ success: true, courseId, value });
+      }, 500);
+    });
+  } else {
+    const response = await client.post(`/courses/${courseId}/rating`, { value });
+    return response.data;
+  }
+}
+
+// ==== File: src/api/mockData.ts ====
+// This file provides mock data for development until the actual API is connected
+import { Course } from '../types/Course';
+
+export const mockCourses: Course[] = [
+  {
+    id: '1',
+    authorName: 'Иван Иванов',
+    coverUrl: '/images/courses/python.png',
+    title: 'Подготовка к Python Middle собеседованию',
+    difficulty: 'Middle',
+    language: 'Python',
+    tags: ['Python', 'Backend', 'Algorithms'],
+    estimatedDuration: 20,
+    stats: {
+      enrollments: 156,
+      avgCompletion: 73,
+      avgScore: 4.9
+    },
+    lessons: [
+      { id: '101', title: 'Основы Python', type: 'Theory', hasQuiz: true },
+      { id: '102', title: 'Структуры данных', type: 'Theory', hasQuiz: true },
+      { id: '103', title: 'Алгоритмы', type: 'Coding', hasQuiz: true }
+    ]
+  },
+  {
+    id: '2',
+    authorName: 'Полина Смирнова',
+    coverUrl: '/images/courses/algos.png',
+    title: 'Алгоритмы и структуры данных для собеседований',
+    difficulty: 'Middle',
+    language: 'JavaScript',
+    tags: ['Algorithms', 'Data Structures', 'Leetcode'],
+    estimatedDuration: 15,
+    stats: {
+      enrollments: 243,
+      avgCompletion: 68,
+      avgScore: 4.8
+    },
+    lessons: [
+      { id: '201', title: 'Сложность алгоритмов', type: 'Theory', hasQuiz: true },
+      { id: '202', title: 'Сортировки', type: 'Coding', hasQuiz: true },
+      { id: '203', title: 'Деревья и графы', type: 'Theory', hasQuiz: true }
+    ]
+  },
+  {
+    id: '3',
+    authorName: 'Петр Петров',
+    coverUrl: '/images/courses/anal.png',
+    title: 'Интервью аналитика: SQL, Excel, кейсы',
+    difficulty: 'Beginner',
+    language: 'SQL',
+    tags: ['SQL', 'Analytics', 'Excel'],
+    estimatedDuration: 12,
+    stats: {
+      enrollments: 189,
+      avgCompletion: 82,
+      avgScore: 4.8
+    },
+    lessons: [
+      { id: '301', title: 'Основы SQL', type: 'Theory', hasQuiz: true },
+      { id: '302', title: 'Сложные запросы', type: 'Coding', hasQuiz: true },
+      { id: '303', title: 'Аналитические кейсы', type: 'Theory', hasQuiz: false }
+    ]
+  },
+  {
+    id: '4',
+    authorName: 'Василий Васильев',
+    coverUrl: '/images/courses/softs.png',
+    title: 'Расскажи о себе: soft skills на собеседовании',
+    difficulty: 'Beginner',
+    language: 'Русский',
+    tags: ['Soft skills', 'HR', 'Interview'],
+    estimatedDuration: 8,
+    stats: {
+      enrollments: 315,
+      avgCompletion: 91,
+      avgScore: 5.0
+    },
+    lessons: [
+      { id: '401', title: 'Самопрезентация', type: 'Theory', hasQuiz: true },
+      { id: '402', title: 'Сложные вопросы', type: 'Theory', hasQuiz: true },
+      { id: '403', title: 'Обратная связь', type: 'Theory', hasQuiz: false }
+    ]
+  },
+  {
+    id: '5',
+    authorName: 'Александра Александрова',
+    coverUrl: '/images/courses/sysdis.png',
+    title: 'System Design для Senior',
+    difficulty: 'Senior',
+    language: 'English',
+    tags: ['System Design', 'Architecture', 'Senior'],
+    estimatedDuration: 25,
+    stats: {
+      enrollments: 142,
+      avgCompletion: 62,
+      avgScore: 4.7
+    },
+    lessons: [
+      { id: '501', title: 'Основы системного дизайна', type: 'Theory', hasQuiz: true },
+      { id: '502', title: 'Масштабирование', type: 'Theory', hasQuiz: true },
+      { id: '503', title: 'Практические кейсы', type: 'Coding', hasQuiz: true }
+    ]
+  },
+  {
+    id: '6',
+    authorName: 'Андрей Андреев',
+    coverUrl: '/images/courses/js.png',
+    title: 'JavaScript для Junior Frontend',
+    difficulty: 'Beginner',
+    language: 'JavaScript',
+    tags: ['JavaScript', 'Frontend', 'Web'],
+    estimatedDuration: 18,
+    stats: {
+      enrollments: 278,
+      avgCompletion: 76,
+      avgScore: 5.0
+    },
+    lessons: [
+      { id: '601', title: 'Основы JavaScript', type: 'Theory', hasQuiz: true },
+      { id: '602', title: 'DOM манипуляции', type: 'Theory', hasQuiz: true },
+      { id: '603', title: 'Асинхронный JavaScript', type: 'Coding', hasQuiz: true }
+    ]
+  }
+];
+
+// Modify the coursesApi.ts file to use mock data
+// You'll replace this with actual API calls later
+
+export function setupMockApi() {
+  // You can intercept axios here if needed
+  console.log('Mock API setup complete');
+}
+
+// ==== File: src/api/userApi.ts ====
+import client from './client';
+import type { User } from '../types/User';
+
+interface UpdateProfileData {
+  fullName?: string;
+  avatarUrl?: string | null;
+}
+
+/**
+ * Получение данных текущего пользователя
+ */
+export async function getCurrentUser(): Promise<User> {
+  const response = await client.get<User>('/users/me');
+  return response.data;
+}
+
+/**
+ * Обновление данных профиля пользователя
+ * @param data Данные для обновления
+ */
+export async function updateProfile(data: UpdateProfileData): Promise<User> {
+  const response = await client.patch<User>('/users/me', data);
+  
+  // Обновляем информацию о пользователе в localStorage
+  const user = response.data;
+  localStorage.setItem('user', JSON.stringify(user));
+  
+  return user;
+}
+
+/**
+ * Загрузка аватара пользователя
+ * @param formData FormData с файлом аватара
+ */
+export async function uploadAvatar(formData: FormData): Promise<{ avatarUrl: string }> {
+  const response = await client.post<{ avatarUrl: string }>('/users/me/avatar', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+  return response.data;
+}
+
+// ==== File: src/components/AuthModal.tsx ====
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { login, register } from '../api/authApi';
+
+interface AuthModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onLoginSuccess: () => void;
+}
+
+const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+
+    try {
+      if (isLoginMode) {
+        await login({ email, password });
+      } else {
+        if (password !== confirmPassword) {
+          throw new Error('Пароли не совпадают');
+        }
+        await register({ email, password, fullName });
+      }
+      onLoginSuccess();
+      onClose();
+      navigate('/');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Произошла ошибка');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold">
+            {isLoginMode ? 'Вход' : 'Регистрация'}
+          </h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+            &times;
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-2 bg-red-100 text-red-700 rounded text-sm">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          {!isLoginMode && (
+            <>
+              <div className="mb-4">
+                <label className="block text-gray-700 text-sm font-medium mb-1">
+                  ФИО
+                </label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  required
+                  placeholder="Иванов Иван Иванович"
+                />
+              </div>
+            </>
+          )}
+
+          <div className="mb-4">
+            <label className="block text-gray-700 text-sm font-medium mb-1">
+              Email
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              required
+              placeholder="example@mail.ru"
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-gray-700 text-sm font-medium mb-1">
+              Пароль
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              required
+              minLength={8}
+              placeholder="Не менее 8 символов"
+            />
+          </div>
+
+          {!isLoginMode && (
+            <div className="mb-6">
+              <label className="block text-gray-700 text-sm font-medium mb-1">
+                Подтверждение пароля
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                required
+                minLength={8}
+                placeholder="Повторите пароль"
+              />
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full bg-orange-500 text-white py-2 px-4 rounded-md hover:bg-orange-600 transition-colors disabled:bg-orange-300"
+          >
+            {isLoading ? 'Загрузка...' : isLoginMode ? 'Войти' : 'Зарегистрироваться'}
+          </button>
+        </form>
+
+        <div className="mt-4 text-center text-sm">
+          <button
+            onClick={() => {
+              setIsLoginMode(!isLoginMode);
+              setError('');
+              setPassword('');
+              setConfirmPassword('');
+            }}
+            className="text-orange-500 hover:text-orange-600"
+          >
+            {isLoginMode
+              ? 'Нет аккаунта? Зарегистрироваться'
+              : 'Уже есть аккаунт? Войти'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AuthModal;
+
+// ==== File: src/components/CourseCard.tsx ====
+import React from 'react';
+import { Link } from 'react-router-dom';
+import type { Course } from '../types/Course';
+import { useAuth } from '../hooks/useAuth';
+
+interface CourseCardProps {
+  course: Course;
+}
+
+const CourseCard: React.FC<CourseCardProps> = ({ course }) => {
+  const { isAuthenticated } = useAuth();
+
+  const getDifficultyLabel = (difficulty: string) => {
+    switch (difficulty) {
+      case 'Beginner':
+        return 'Для начинающих';
+      case 'Middle':
+        return 'Средний уровень';
+      case 'Senior':
+        return 'Продвинутый уровень';
+      default:
+        return difficulty;
+    }
+  };
+
+  return (
+    <div className="h-full">
+      <Link to={isAuthenticated ? `/courses/${course.id}` : '#'} className="block h-full">
+        <div className="card h-48 sm:h-56 bg-gray-300 relative overflow-hidden rounded-2xl">
+          {/* Фон */}
+          <img
+            src={course.coverUrl}
+            alt={course.title}
+            className="w-full h-full object-cover"
+          />
+          {/* Оверлей */}
+          <div className="absolute inset-0 bg-gray-500 opacity-30 rounded-2xl" />
+          {/* Контент */}
+          <div className="absolute inset-0 z-10 p-4 flex flex-col justify-between">
+            {/* Автор и заголовок */}
+            <div>
+              <div className="mb-1 text-xs text-white">{course.authorName}</div>
+              <h3 className="text-lg font-light leading-tight line-clamp-2 text-white">
+                {course.title}
+              </h3>
+            </div>
+            {/* Статистика */}
+            <div className="flex items-center space-x-6 text-white">
+              {/* Рейтинг */}
+              <div className="flex items-center">
+                <span className="text-yellow-400 mr-1 text-xs">★</span>
+                <span className="text-sm">{course.stats.avgScore.toFixed(1)}</span>
+              </div>
+              {/* Длительность */}
+              <div className="flex items-center">
+                <svg className="w-3.5 h-3.5 text-green-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 8V12L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+                </svg>
+                <span className="text-sm">{course.estimatedDuration} ч</span>
+              </div>
+              {/* Уровень */}
+              <div className="flex items-center">
+                <svg className="w-3.5 h-3.5 text-blue-400 mr-1" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <span className="text-sm">{getDifficultyLabel(course.difficulty)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Link>
+      {!isAuthenticated && (
+        <div className="mt-2 text-xs text-gray-500 text-center">
+          Войдите, чтобы просмотреть курс
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default CourseCard;
+
+// ==== File: src/components/CourseList.tsx ====
+import React from 'react';
+import type { Course } from '../types/Course';
+import CourseCard from './CourseCard';
+
+interface CourseListProps {
+  courses: Course[];
+  loading?: boolean;
+  error?: Error | null;
+}
+
+const CourseList: React.FC<CourseListProps> = ({ 
+  courses, 
+  loading = false, 
+  error = null 
+}) => {
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-16">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-orange-500"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-red-500 mb-2">Произошла ошибка при загрузке курсов</div>
+        <div className="text-gray-500 text-sm">{error.message}</div>
+        <button 
+          onClick={() => window.location.reload()}
+          className="mt-4 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+        >
+          Попробовать снова
+        </button>
+      </div>
+    );
+  }
+
+  if (courses.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-gray-500 mb-2">Курсы не найдены</div>
+        <div className="text-gray-400 text-sm">Попробуйте изменить параметры поиска</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {courses.map(course => (
+        <CourseCard key={course.id} course={course} />
+      ))}
+    </div>
+  );
+};
+
+export default CourseList;
+
+// ==== File: src/components/Filters.tsx ====
+import React from 'react';
+
+interface FiltersProps {
+  onChange: (filters: { sort?: 'popularity' | 'difficulty' | 'duration'; level?: string; language?: string }) => void;
+}
+
+const Filters: React.FC<FiltersProps> = ({ onChange }) => {
+  const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onChange({ sort: e.target.value as 'popularity' | 'difficulty' | 'duration' });
+  };
+
+  const handleLevelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onChange({ level: e.target.value });
+  };
+
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onChange({ language: e.target.value });
+  };
+
+  return (
+    <div className="flex flex-wrap gap-2 items-center">
+      {/* Сортировка */}
+      <div className="relative">
+        <select
+          onChange={handleSortChange}
+          defaultValue="popularity"
+          className="select-filter select-primary rounded-md appearance-none pr-6 pl-3 py-1.5 text-sm"
+        >
+          <option value="popularity">Сначала: Популярное</option>
+          <option value="difficulty">Сначала: Сложность</option>
+          <option value="duration">Сначала: Длительность</option>
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-white">
+          <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+
+      {/* Уровень */}
+      <div className="relative">
+        <select
+          onChange={handleLevelChange}
+          defaultValue=""
+          className="select-filter select-dark rounded-md appearance-none pr-6 pl-3 py-1.5 text-sm"
+        >
+          <option value="">Уровень</option>
+          <option value="Beginner">Beginner</option>
+          <option value="Middle">Middle</option>
+          <option value="Senior">Senior</option>
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-white">
+          <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+
+      {/* Язык */}
+      <div className="relative">
+        <select
+          onChange={handleLanguageChange}
+          defaultValue=""
+          className="select-filter select-dark rounded-md appearance-none pr-6 pl-3 py-1.5 text-sm"
+        >
+          <option value="">Язык</option>
+          <option value="JavaScript">JavaScript</option>
+          <option value="Python">Python</option>
+          <option value="SQL">SQL</option>
+          <option value="Java">Java</option>
+          <option value="C++">C++</option>
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-white">
+          <svg className="h-3 w-3 fill-current" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Filters;
+
+
+// ==== File: src/components/Layout.tsx ====
+import React from 'react';
+import Navbar from './Navbar';
+
+interface LayoutProps {
+  children: React.ReactNode;
+}
+
+const Layout: React.FC<LayoutProps> = ({ children }) => {
+  return (
+    <div className="min-h-screen flex flex-col bg-gray-50">
+      <Navbar />
+      <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {children}
+      </main>
+      <footer className="bg-white border-t border-gray-200 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center text-gray-500 text-sm">
+            © {new Date().getFullYear()} AI-Hunt. Все права защищены.
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default Layout;
+
+// ==== File: src/components/Navbar.tsx ====
+import React, { useState } from 'react';
+import { NavLink, Link } from 'react-router-dom';
+import AuthModal from './AuthModal';
+import { useAuth } from '../hooks/useAuth';
+
+const Navbar: React.FC = () => {
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { user, logout } = useAuth();
+
+  return (
+    <>
+      <nav className="bg-white shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center">
+              <NavLink to="/" className="flex-shrink-0 flex items-center">
+                <span className="text-2xl font-bold text-gray-900">AI-Hunt</span>
+              </NavLink>
+              <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
+                <NavLink
+                  to="/"
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                  }
+                >
+                  Курсы
+                </NavLink>
+                <NavLink
+                  to="/about"
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                  }
+                >
+                  О нас
+                </NavLink>
+                {user && user.role === 'author' && (
+                  <NavLink
+                    to="/create-course"
+                    className={({ isActive }) =>
+                      isActive
+                        ? 'border-orange-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium'
+                    }
+                  >
+                    Создать курс
+                  </NavLink>
+                )}
+              </div>
+            </div>
+            <div className="hidden sm:ml-6 sm:flex sm:items-center">
+              {user ? (
+                <div className="flex items-center space-x-4">
+                  <Link
+                    to="/profile"
+                    className="flex items-center text-gray-700 hover:text-orange-500 transition-colors"
+                  >
+                    {user.avatarUrl ? (
+                      <img
+                        src={user.avatarUrl}
+                        alt={user.fullName || 'Profile'}
+                        className="w-8 h-8 rounded-full object-cover mr-2"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center mr-2">
+                        <span className="text-gray-600 font-medium">
+                          {user.fullName ? user.fullName.charAt(0).toUpperCase() : 'U'}
+                        </span>
+                      </div>
+                    )}
+                    <span className="text-sm font-medium">Профиль</span>
+                  </Link>
+                  <button
+                    onClick={logout}
+                    className="flex items-center text-gray-700 hover:text-orange-500 transition-colors focus:outline-none"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4 mr-1"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                      />
+                    </svg>
+                    <span className="text-sm font-medium">Выйти</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="flex items-center text-gray-700 hover:text-orange-500 transition-colors focus:outline-none"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4 mr-1"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5.121 17.804A13.937 13.937 0 0112 15c2.485 0 4.807.66 6.879 1.804M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                  <span className="text-sm font-medium">Войти</span>
+                </button>
+              )}
+            </div>
+            <div className="flex items-center sm:hidden">
+              <button
+                type="button"
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                className="inline-flex items-center justify-center p-1.5 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-orange-500"
+                aria-expanded="false"
+              >
+                <span className="sr-only">{isMenuOpen ? 'Закрыть меню' : 'Открыть меню'}</span>
+                <svg
+                  className="block h-5 w-5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                  strokeWidth="2"
+                >
+                  {isMenuOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Мобильное меню */}
+        {isMenuOpen && (
+          <div className="sm:hidden">
+            <div className="pt-2 pb-3 space-y-1">
+              <NavLink
+                to="/"
+                className={({ isActive }) =>
+                  isActive
+                    ? 'bg-orange-50 border-orange-500 text-orange-700 block pl-3 pr-4 py-2 border-l-4 text-base font-medium'
+                    : 'border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700 block pl-3 pr-4 py-2 border-l-4 text-base font-medium'
+                }
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Курсы
+              </NavLink>
+              <NavLink
+                to="/about"
+                className={({ isActive }) =>
+                  isActive
+                    ? 'bg-orange-50 border-orange-500 text-orange-700 block pl-3 pr-4 py-2 border-l-4 text-base font-medium'
+                    : 'border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700 block pl-3 pr-4 py-2 border-l-4 text-base font-medium'
+                }
+                onClick={() => setIsMenuOpen(false)}
+              >
+                О нас
+              </NavLink>
+              {user && user.role === 'author' && (
+                <NavLink
+                  to="/create-course"
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'bg-orange-50 border-orange-500 text-orange-700 block pl-3 pr-4 py-2 border-l-4 text-base font-medium'
+                      : 'border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700 block pl-3 pr-4 py-2 border-l-4 text-base font-medium'
+                  }
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Создать курс
+                </NavLink>
+              )}
+            </div>
+            <div className="pt-4 pb-3 border-t border-gray-200">
+              {user ? (
+                <div>
+                  <div className="flex items-center px-4">
+                    {user.avatarUrl ? (
+                      <img
+                        src={user.avatarUrl}
+                        alt={user.fullName || 'Profile'}
+                        className="h-10 w-10 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                        <span className="text-gray-600 font-medium">
+                          {user.fullName ? user.fullName.charAt(0).toUpperCase() : 'U'}
+                        </span>
+                      </div>
+                    )}
+                    <div className="ml-3">
+                      <div className="text-base font-medium text-gray-800">{user.fullName}</div>
+                      <div className="text-sm font-medium text-gray-500">{user.email}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-1">
+                    <Link
+                      to="/profile"
+                      className="block px-4 py-2 text-base font-medium text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+                      onClick={() => setIsMenuOpen(false)}
+                    >
+                      Профиль
+                    </Link>
+                    <button
+                      onClick={() => {
+                        logout();
+                        setIsMenuOpen(false);
+                      }}
+                      className="block w-full text-left px-4 py-2 text-base font-medium text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+                    >
+                      Выйти
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="px-4">
+                  <button
+                    onClick={() => {
+                      setIsAuthModalOpen(true);
+                      setIsMenuOpen(false);
+                    }}
+                    className="block text-base font-medium text-gray-500 hover:text-gray-800 hover:bg-gray-100 px-4 py-2 w-full text-left"
+                  >
+                    Войти
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </nav>
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onLoginSuccess={() => setIsAuthModalOpen(false)}
+      />
+    </>
+  );
+};
+
+export default Navbar;
+
+// ==== File: src/components/SearchBar.tsx ====
+import React, { useState } from 'react';
+
+interface SearchBarProps {
+  onSearch: (query: string) => void;
+  placeholder?: string;
+}
+
+const SearchBar: React.FC<SearchBarProps> = ({ 
+  onSearch, 
+  placeholder = 'Поиск' 
+}) => {
+  const [query, setQuery] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSearch(query);
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      onSearch(query);
+    }
+  };
+
+  return (
+    <div className="relative flex-1 max-w-lg">
+      <form onSubmit={handleSubmit}>
+        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+          <svg 
+            className="w-3 h-3 text-gray-400" 
+            xmlns="http://www.w3.org/2000/svg" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" 
+            />
+          </svg>
+        </div>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyPress={handleKeyPress}
+          placeholder={placeholder}
+          className="w-full pl-8 pr-4 py-2 rounded-lg bg-gray-100 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+        />
+      </form>
+    </div>
+  );
+};
+
+export default SearchBar;
+
+// ==== File: src/hooks/useAuth.ts ====
+import { useState, useEffect } from 'react';
+import { login as apiLogin, register as apiRegister, logout as apiLogout } from '../api/authApi';
+import type { User } from '../types/User';
+
+export function useAuth() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.error('Failed to parse user data', e);
+      }
+    }
+    setIsLoading(false);
+  }, []);
+
+  // Функция для входа по email и паролю
+  const login = async (emailOrUser: string | User, password?: string): Promise<User> => {
+    // Если первый аргумент - объект User, то просто обновляем состояние
+    if (typeof emailOrUser === 'object') {
+      setUser(emailOrUser);
+      return emailOrUser;
+    }
+    
+    // Иначе выполняем вход с email и password
+    const userData = await apiLogin({ email: emailOrUser, password: password! });
+    setUser(userData);
+    return userData;
+  };
+
+  const register = async (email: string, password: string, fullName: string): Promise<User> => {
+    const userData = await apiRegister({ email, password, fullName });
+    setUser(userData);
+    return userData;
+  };
+
+  const logout = () => {
+    apiLogout();
+    setUser(null);
+  };
+
+  // Функция для обновления состояния пользователя (без API-запроса)
+  const updateUserState = (updatedUser: User) => {
+    setUser(updatedUser);
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+  };
+
+  return {
+    user,
+    isLoading,
+    login,
+    register,
+    logout,
+    updateUserState,
+    isAuthenticated: !!user
+  };
+}
+
+// ==== File: src/hooks/useCourses.ts ====
+import { useState, useEffect } from 'react';
+import { getCourses } from '../api/coursesApi';
+import type { Course } from '../types/Course';
+
+interface CourseFilters {
+  search?: string;
+  sort?: 'popularity' | 'difficulty' | 'duration';
+  level?: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+}
+
+export function useCourses() {
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const [filters, setFilters] = useState<CourseFilters>({
+    sort: 'popularity'
+  });
+
+  const fetchCourses = async (newFilters?: Partial<CourseFilters>) => {
+    const updatedFilters = { ...filters, ...newFilters };
+    setFilters(updatedFilters);
+    
+    setLoading(true);
+    try {
+      const data = await getCourses(updatedFilters);
+      setCourses(data);
+      setError(null);
+    } catch (e) {
+      setError(e as Error);
+      setCourses([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial fetch on mount
+  useEffect(() => {
+    fetchCourses();
+  }, []);
+
+  return { 
+    courses, 
+    loading, 
+    error, 
+    filters,
+    fetchCourses 
+  };
+}
+
+// ==== File: src/index.tsx ====
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import './styles/globals.css';
+
+createRoot(document.getElementById('root')!).render(<App />);
+
+
+// ==== File: src/main.tsx ====
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import './styles/globals.css'
+import App from './App'
+
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+
+// ==== File: src/pages/CatalogPage.tsx ====
+import React, { useEffect } from 'react';
+import SearchBar from '../components/SearchBar';
+import Filters from '../components/Filters';
+import CourseList from '../components/CourseList';
+import { useCourses } from '../hooks/useCourses';
+
+const CatalogPage: React.FC = () => {
+  const { courses, loading, error, fetchCourses } = useCourses();
+
+  useEffect(() => {
+    document.title = 'Каталог курсов - AI-Hunt';
+  }, []);
+
+  const handleSearch = (query: string) => {
+    fetchCourses({ search: query });
+  };
+
+  const handleFilterChange = (filters: { sort?: string; level?: string; language?: string }) => {
+    fetchCourses(filters);
+  };
+
+  return (
+    <div>
+      <h1 className="text-3xl font-bold text-gray-900 mb-8">Каталог курсов</h1>
+      
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-8">
+        <SearchBar onSearch={handleSearch} placeholder="Поиск курсов..." />
+        <Filters onChange={handleFilterChange} />
+      </div>
+
+      <CourseList 
+        courses={courses} 
+        loading={loading} 
+        error={error} 
+      />
+    </div>
+  );
+};
+
+export default CatalogPage;
+
+// ==== File: src/pages/ProfilePage.tsx ====
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../hooks/useAuth';
+import { updateProfile, uploadAvatar } from '../api/userApi';
+import { getCourses } from '../api/coursesApi';
+import { Course } from '../types/Course';
+import '../styles/profile.css';
+
+enum ProfileTab {
+  ActiveCourses = 'active',
+  CompletedCourses = 'completed',
+  CreatedCourses = 'created'
+}
+
+const ProfilePage: React.FC = () => {
+  const { user, login } = useAuth();
+  const [fullName, setFullName] = useState('');
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [activeTab, setActiveTab] = useState<ProfileTab>(ProfileTab.ActiveCourses);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [isLoadingCourses, setIsLoadingCourses] = useState(false);
+
+  console.log('ProfilePage component rendering');
+  console.log('Current user state:', user);
+
+  useEffect(() => {
+    if (user) {
+      setFullName(user.fullName || '');
+    }
+  }, [user]);
+
+  useEffect(() => {
+    console.log('useEffect for loading courses, user:', user);
+    if (user) {
+      console.log('Attempting to load courses for tab:', activeTab);
+      loadCourses();
+    }
+  }, [user, activeTab]);
+
+  const loadCourses = async () => {
+    console.log('loadCourses called');
+    if (!user) {
+      console.log('No user, skipping course loading');
+      return;
+    }
+
+    setIsLoadingCourses(true);
+    try {
+      console.log('Making API call to get courses');
+      // В реальном приложении нужно будет добавить API для получения 
+      // курсов пользователя с фильтрацией по статусу
+      const allCourses = await getCourses();
+      
+      // Фильтруем курсы в зависимости от активного таба
+      // Это временное решение, в реальном приложении фильтрация должна быть на стороне бэкенда
+      let filteredCourses: Course[] = [];
+      
+      if (activeTab === ProfileTab.ActiveCourses) {
+        // Имитация фильтрации активных курсов (в реальности нужен API с фильтрами)
+        filteredCourses = allCourses.slice(0, 3);
+      } else if (activeTab === ProfileTab.CompletedCourses) {
+        // Имитация фильтрации завершенных курсов
+        filteredCourses = allCourses.slice(3, 4);
+      } else if (activeTab === ProfileTab.CreatedCourses && user.role === 'author') {
+        // Имитация фильтрации созданных курсов (для авторов)
+        filteredCourses = allCourses.filter(course => course.authorId === user.id);
+      }
+      
+      setCourses(filteredCourses);
+    } catch (error) {
+      console.error('Error loading courses:', error);
+    } finally {
+      setIsLoadingCourses(false);
+    }
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setAvatarFile(file);
+      
+      // Показываем предпросмотр
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setAvatarPreview(event.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setMessage(null);
+  
+    try {
+      // Обновляем базовые данные профиля
+      const updatedUser = await updateProfile({
+        fullName
+      });
+  
+      // Если есть новый аватар, загружаем его
+      if (avatarFile) {
+        const formData = new FormData();
+        formData.append('avatar', avatarFile);
+        const avatarResponse = await uploadAvatar(formData);
+        
+        // Обновляем локальные данные пользователя с новым URL аватара
+        updatedUser.avatarUrl = avatarResponse.avatarUrl;
+      }
+  
+      // Обновляем локальное состояние пользователя
+      // Используем обновленную функцию login, которая теперь может принимать объект пользователя
+      login(updatedUser);
+      
+      setMessage({ text: 'Профиль успешно обновлен', type: 'success' });
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      setMessage({ text: 'Ошибка при обновлении профиля', type: 'error' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!user) {
+    return (
+      <div className="flex justify-center items-center min-h-[calc(100vh-64px)]">
+        <div className="text-center">
+          <p className="text-lg">Для просмотра профиля необходимо войти в систему</p>
+        </div>
+      </div>
+    );
+  }
+
+  const renderCoursesTab = () => {
+    if (isLoadingCourses) {
+      return (
+        <div className="flex justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+        </div>
+      );
+    }
+
+    if (courses.length === 0) {
+      let emptyMessage = 'У вас пока нет активных курсов';
+      
+      if (activeTab === ProfileTab.CompletedCourses) {
+        emptyMessage = 'У вас пока нет завершенных курсов';
+      } else if (activeTab === ProfileTab.CreatedCourses) {
+        emptyMessage = 'Вы пока не создали ни одного курса';
+      }
+      
+      return (
+        <div className="text-center py-8 text-gray-500">
+          <p>{emptyMessage}</p>
+          {activeTab === ProfileTab.CreatedCourses && (
+            <a href="/create-course" className="mt-4 inline-block px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600">
+              Создать курс
+            </a>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="course-grid">
+        {courses.map(course => (
+          <div key={course.id} className="course-card">
+            <div className="h-40 bg-gray-200 relative">
+              <img 
+                src={course.coverUrl} 
+                alt={course.title} 
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-black bg-opacity-30"></div>
+              <div className="absolute bottom-0 left-0 right-0 p-4">
+                <h3 className="text-white font-medium truncate">{course.title}</h3>
+                <p className="text-white text-sm opacity-80">{course.authorName}</p>
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center text-sm text-gray-600">
+                  <svg className="w-4 h-4 mr-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>{course.estimatedDuration} ч</span>
+                </div>
+                <div className="flex items-center text-sm text-gray-600">
+                  <span className="text-yellow-500 mr-1">★</span>
+                  <span>{course.stats.avgScore.toFixed(1)}</span>
+                </div>
+              </div>
+              
+              {activeTab !== ProfileTab.CreatedCourses && (
+                <div className="mb-4">
+                  <p className="text-xs text-gray-500 mb-1">Прогресс</p>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="bg-orange-500 h-2 rounded-full" 
+                      style={{ width: `${activeTab === ProfileTab.CompletedCourses ? 100 : Math.floor(Math.random() * 80) + 10}%` }}
+                    ></div>
+                  </div>
+                </div>
+              )}
+              
+              <div>
+                <a 
+                  href={`/courses/${course.id}`} 
+                  className="w-full inline-block text-center py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600 text-sm font-medium"
+                >
+                  {activeTab === ProfileTab.CreatedCourses ? 'Редактировать' : 'Продолжить'}
+                </a>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <div className="max-w-6xl mx-auto">
+        <div className="bg-white rounded-lg shadow p-6 mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-6">Профиль пользователя</h1>
+
+          {message && (
+            <div className={`p-4 mb-6 rounded-md ${message.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+              {message.text}
+            </div>
+          )}
+
+          {isEditing ? (
+            // Форма редактирования профиля
+            <form onSubmit={handleSubmit}>
+              <div className="flex flex-col sm:flex-row gap-6 mb-6">
+                <div className="w-full sm:w-1/3">
+                  <div className="avatar-upload mx-auto">
+                    <div className="avatar-preview">
+                      <img 
+                        src={avatarPreview || user.avatarUrl || '/images/default-avatar.png'} 
+                        alt={user.fullName || 'User'} 
+                      />
+                    </div>
+                    <div className="avatar-edit">
+                      <input 
+                        type="file" 
+                        id="avatarUpload" 
+                        accept="image/*" 
+                        onChange={handleAvatarChange} 
+                      />
+                      <label htmlFor="avatarUpload">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="w-full sm:w-2/3">
+                  <div className="mb-4">
+                    <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-1">
+                      ФИО
+                    </label>
+                    <input
+                      id="fullName"
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="mb-4">
+                    <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                      Email
+                    </label>
+                    <input
+                      id="email"
+                      type="email"
+                      value={user.email}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100"
+                      disabled
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Email нельзя изменить</p>
+                  </div>
+                  
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Роль
+                    </label>
+                    <div className="px-3 py-2 border border-gray-300 rounded-md bg-gray-100">
+                      {user.role === 'author' ? 'Автор' : 'Пользователь'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                  disabled={isLoading}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600 disabled:bg-orange-300"
+                  disabled={isLoading}
+                >
+                  {isLoading ? 'Сохранение...' : 'Сохранить'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            // Просмотр профиля
+            <div>
+              <div className="flex flex-col sm:flex-row gap-6 mb-6">
+                <div className="w-full sm:w-1/3">
+                  <div className="w-32 h-32 rounded-full overflow-hidden mx-auto bg-gray-200">
+                    <img 
+                      src={user.avatarUrl || '/images/default-avatar.png'} 
+                      alt={user.fullName || 'User'} 
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                </div>
+                
+                <div className="w-full sm:w-2/3">
+                  <div className="mb-6">
+                    <h2 className="text-xl font-semibold text-gray-900">{user.fullName}</h2>
+                    <p className="text-gray-600">{user.email}</p>
+                    <p className="text-gray-500 mt-1">
+                      {user.role === 'author' ? 'Автор курсов' : 'Пользователь'}
+                    </p>
+                  </div>
+                  
+                  <div className="mt-4">
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">Статистика</h3>
+                    <div className="flex flex-wrap gap-4">
+                      <div className="bg-gray-100 p-4 rounded-md">
+                        <p className="text-sm text-gray-600">Активные курсы</p>
+                        <p className="text-xl font-bold text-gray-900">{user.stats?.activeCourses || 0}</p>
+                      </div>
+                      <div className="bg-gray-100 p-4 rounded-md">
+                        <p className="text-sm text-gray-600">Завершенные курсы</p>
+                        <p className="text-xl font-bold text-gray-900">{user.stats?.completedCourses || 0}</p>
+                      </div>
+                      <div className="bg-gray-100 p-4 rounded-md">
+                        <p className="text-sm text-gray-600">Средний балл</p>
+                        <p className="text-xl font-bold text-gray-900">{user.stats?.avgScore?.toFixed(1) || '0.0'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex justify-end mt-6">
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600"
+                >
+                  Редактировать профиль
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        
+        {/* Табы с курсами */}
+        <div className="profile-tabs">
+          <div 
+            className={`profile-tab ${activeTab === ProfileTab.ActiveCourses ? 'active' : ''}`}
+            onClick={() => setActiveTab(ProfileTab.ActiveCourses)}
+          >
+            Активные курсы
+          </div>
+          <div 
+            className={`profile-tab ${activeTab === ProfileTab.CompletedCourses ? 'active' : ''}`}
+            onClick={() => setActiveTab(ProfileTab.CompletedCourses)}
+          >
+            Завершенные курсы
+          </div>
+          {user.role === 'author' && (
+            <div 
+              className={`profile-tab ${activeTab === ProfileTab.CreatedCourses ? 'active' : ''}`}
+              onClick={() => setActiveTab(ProfileTab.CreatedCourses)}
+            >
+              Мои созданные курсы
+            </div>
+          )}
+        </div>
+        
+        {/* Содержимое активного таба */}
+        {renderCoursesTab()}
+      </div>
+    </div>
+  );
+};
+
+export default ProfilePage;
+
+// ==== File: src/types/Course.ts ====
+export interface LessonSummary {
+  id: string;
+  title: string;
+  type: 'Theory' | 'Coding';
+  hasQuiz: boolean;
+}
+
+export interface CourseStats {
+  enrollments: number;
+  avgCompletion: number;
+  avgScore: number;
+}
+
+export interface Course {
+  id: string;
+  authorId?: string; // Добавлено согласно API
+  authorName: string;
+  coverUrl: string;
+  title: string;
+  description?: string; // Добавлено согласно API
+  difficulty: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+  tags: string[];
+  estimatedDuration: number; // в часах
+  version?: number; // Добавлено согласно API
+  isPublished?: boolean; // Добавлено согласно API
+  stats: CourseStats;
+  lessons: LessonSummary[];
+}
+
+// Модели для создания и обновления курсов
+export interface CourseBase {
+  title: string;
+  description: string;
+  difficulty: 'Beginner' | 'Middle' | 'Senior';
+  tags?: string[];
+  language?: string;
+}
+
+export interface CourseCreateRequest extends CourseBase {
+  lessons?: LessonContent[];
+}
+
+export interface CourseUpdateRequest extends CourseBase {
+  lessons?: LessonContent[];
+}
+
+export interface LessonContent extends LessonSummary {
+  content: string;
+  videoUrl?: string;
+  quiz?: Question[];
+}
+
+export interface Question {
+  id: string;
+  text: string;
+  type: 'choice' | 'shortText' | 'longText';
+  options?: { id: string; label: string }[];
+}
+
+// ==== File: src/types/User.ts ====
+export interface UserStats {
+  activeCourses: number;
+  completedCourses: number;
+  avgScore: number;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  avatarUrl: string | null;
+  role: string;
+  stats: UserStats;
+}
+
+// ==== File: src/vite-env.d.ts ====
+/// <reference types="vite/client" />
+
+
+// ==== File: tailwind.config.js ====
+/** @type {import('tailwindcss').Config} */
+export default {
+    content: [
+      "./index.html",
+      "./src/**/*.{js,ts,jsx,tsx}",
+    ],
+    theme: {
+      extend: {
+        colors: {
+          orange: {
+            DEFAULT: '#e85d04',
+            50: '#fff7ed',
+            100: '#ffedd5',
+            200: '#fed7aa',
+            300: '#fdba74',
+            400: '#fb923c',
+            500: '#f97316',
+            600: '#ea580c',
+            700: '#c2410c',
+            800: '#9a3412',
+            900: '#7c2d12',
+            950: '#431407',
+          },
+        },
+        boxShadow: {
+          card: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+        },
+        fontFamily: {
+          sans: [
+            'Inter',
+            'system-ui',
+            '-apple-system',
+            'BlinkMacSystemFont',
+            '"Segoe UI"',
+            'Roboto',
+            '"Helvetica Neue"',
+            'Arial',
+            'sans-serif',
+          ],
+        },
+      },
+    },
+    plugins: [
+      require('@tailwindcss/line-clamp'),
+    ],
+  }
+
+// ==== File: vite.config.ts ====
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'url'
+import { dirname, resolve } from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    port: 3000,
+    open: true,
+  },
+})
+

@@ -1,9 +1,8 @@
 import client from './client';
 import type { Course } from '../types/Course';
-import { mockCourses } from './mockData';
 
-// Use this flag to switch between mock data and real API
-const USE_MOCK_DATA = true;
+// Изменить на false для использования настоящего API
+const USE_MOCK_DATA = false; 
 
 interface CourseParams {
   search?: string;
@@ -15,6 +14,9 @@ interface CourseParams {
 
 export async function getCourses(params?: CourseParams): Promise<Course[]> {
   if (USE_MOCK_DATA) {
+    // Здесь оставим мок-реализацию для возможности разработки без бэкенда
+    const { mockCourses } = await import('./mockData');
+    
     return new Promise((resolve) => {
       // Simulate network delay
       setTimeout(() => {
@@ -71,13 +73,23 @@ export async function getCourses(params?: CourseParams): Promise<Course[]> {
     });
   } else {
     // Real API call
-    const response = await client.get<Course[]>('/courses', { params });
+    const apiParams: Record<string, string | string[]> = {};
+    
+    // Map frontend params to API params
+    if (params?.search) apiParams.search = params.search;
+    if (params?.sort) apiParams.sort = params.sort;
+    if (params?.level) apiParams.difficulty = params.level; // Изменено на difficulty согласно API
+    if (params?.language) apiParams.language = params.language;
+    if (params?.tags) apiParams.tags = params.tags;
+    
+    const response = await client.get<Course[]>('/courses', { params: apiParams });
     return response.data;
   }
 }
 
 export async function getCourseById(id: string): Promise<Course> {
   if (USE_MOCK_DATA) {
+    const { mockCourses } = await import('./mockData');
     return new Promise((resolve, reject) => {
       setTimeout(() => {
         const course = mockCourses.find(c => c.id === id);
