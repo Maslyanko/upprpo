@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { updateProfile, uploadAvatar } from '../api/userApi';
+import { updateProfile, uploadAvatar, getCurrentUser } from '../api/userApi'; // Add getCurrentUser
 import { getCourses } from '../api/coursesApi';
 import { Course } from '../types/Course';
 import '../styles/profile.css';
+
+// Import mock data for fallback
+import { mockCourses, mockUser } from '../api/mockData';
 
 enum ProfileTab {
   ActiveCourses = 'active',
@@ -12,7 +15,8 @@ enum ProfileTab {
 }
 
 const ProfilePage: React.FC = () => {
-  const { user, login } = useAuth();
+  const { user, updateUserState } = useAuth();
+  const [userData, setUserData] = useState(user);
   const [fullName, setFullName] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -22,56 +26,96 @@ const ProfilePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ProfileTab>(ProfileTab.ActiveCourses);
   const [courses, setCourses] = useState<Course[]>([]);
   const [isLoadingCourses, setIsLoadingCourses] = useState(false);
+  const [hasApiError, setHasApiError] = useState(false);
 
-  console.log('ProfilePage component rendering');
-  console.log('Current user state:', user);
+  // Debug logging
+  console.log('ProfilePage rendered, user:', user);
 
+  // Try to fetch the latest user data on mount
   useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        console.log('Fetching latest user data');
+        const latestUserData = await getCurrentUser();
+        setUserData(latestUserData);
+        updateUserState(latestUserData);
+        setHasApiError(false);
+      } catch (error) {
+        console.error('Failed to fetch user data:', error);
+        setHasApiError(true);
+        
+        // Use mock data as fallback if necessary
+        if (!userData) {
+          console.log('Using mock user data as fallback');
+          setUserData(mockUser);
+        }
+      }
+    };
+
     if (user) {
-      setFullName(user.fullName || '');
+      fetchUserData();
     }
-  }, [user]);
+  }, []);
 
+  // Initialize fullName when user data is available
   useEffect(() => {
-    console.log('useEffect for loading courses, user:', user);
-    if (user) {
-      console.log('Attempting to load courses for tab:', activeTab);
+    if (userData) {
+      setFullName(userData.fullName || '');
+    }
+  }, [userData]);
+
+  // Load courses when user or active tab changes
+  useEffect(() => {
+    console.log('Loading courses effect triggered');
+    if (userData) {
       loadCourses();
     }
-  }, [user, activeTab]);
+  }, [userData, activeTab]);
 
   const loadCourses = async () => {
-    console.log('loadCourses called');
-    if (!user) {
-      console.log('No user, skipping course loading');
+    console.log('loadCourses called, userData:', userData);
+    if (!userData) {
+      console.log('No user data, skipping course loading');
       return;
     }
 
     setIsLoadingCourses(true);
     try {
       console.log('Making API call to get courses');
-      // В реальном приложении нужно будет добавить API для получения 
-      // курсов пользователя с фильтрацией по статусу
-      const allCourses = await getCourses();
+      let allCourses: Course[] = [];
       
-      // Фильтруем курсы в зависимости от активного таба
-      // Это временное решение, в реальном приложении фильтрация должна быть на стороне бэкенда
+      try {
+        allCourses = await getCourses();
+        setHasApiError(false);
+      } catch (error) {
+        console.error('Error fetching courses from API, using mock data:', error);
+        allCourses = mockCourses;
+        setHasApiError(true);
+      }
+      
+      console.log('Received courses:', allCourses);
+      
+      // Filter courses based on the active tab
       let filteredCourses: Course[] = [];
       
       if (activeTab === ProfileTab.ActiveCourses) {
-        // Имитация фильтрации активных курсов (в реальности нужен API с фильтрами)
+        // For demo, just show first 3 courses as active
         filteredCourses = allCourses.slice(0, 3);
       } else if (activeTab === ProfileTab.CompletedCourses) {
-        // Имитация фильтрации завершенных курсов
+        // For demo, just show course at index 3 as completed
         filteredCourses = allCourses.slice(3, 4);
-      } else if (activeTab === ProfileTab.CreatedCourses && user.role === 'author') {
-        // Имитация фильтрации созданных курсов (для авторов)
-        filteredCourses = allCourses.filter(course => course.authorId === user.id);
+      } else if (activeTab === ProfileTab.CreatedCourses && userData.role === 'author') {
+        // For demo, filter by author name
+        filteredCourses = allCourses.filter(course => {
+          return course.authorName === userData.fullName || 
+                 (course.authorId && course.authorId === userData.id);
+        });
       }
       
+      console.log('Filtered courses:', filteredCourses);
       setCourses(filteredCourses);
     } catch (error) {
-      console.error('Error loading courses:', error);
+      console.error('Error in loadCourses:', error);
     } finally {
       setIsLoadingCourses(false);
     }
@@ -82,7 +126,7 @@ const ProfilePage: React.FC = () => {
       const file = e.target.files[0];
       setAvatarFile(file);
       
-      // Показываем предпросмотр
+      // Create preview
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
@@ -99,36 +143,50 @@ const ProfilePage: React.FC = () => {
     setMessage(null);
   
     try {
-      // Обновляем базовые данные профиля
+      if (hasApiError) {
+        // Simulate API response for testing
+        setTimeout(() => {
+          const updatedMockUser = { ...mockUser, fullName };
+          setUserData(updatedMockUser);
+          updateUserState(updatedMockUser);
+          setMessage({ text: 'Профиль успешно обновлен (режим тестирования)', type: 'success' });
+          setIsEditing(false);
+          setIsLoading(false);
+        }, 1000);
+        return;
+      }
+      
+      // Update profile data
       const updatedUser = await updateProfile({
         fullName
       });
   
-      // Если есть новый аватар, загружаем его
+      // Upload new avatar if selected
       if (avatarFile) {
         const formData = new FormData();
         formData.append('avatar', avatarFile);
         const avatarResponse = await uploadAvatar(formData);
         
-        // Обновляем локальные данные пользователя с новым URL аватара
+        // Update user with new avatar URL
         updatedUser.avatarUrl = avatarResponse.avatarUrl;
       }
   
-      // Обновляем локальное состояние пользователя
-      // Используем обновленную функцию login, которая теперь может принимать объект пользователя
-      login(updatedUser);
+      // Update user state
+      setUserData(updatedUser);
+      updateUserState(updatedUser);
       
       setMessage({ text: 'Профиль успешно обновлен', type: 'success' });
       setIsEditing(false);
     } catch (error) {
       console.error('Error updating profile:', error);
-      setMessage({ text: 'Ошибка при обновлении профиля', type: 'error' });
+      setMessage({ text: 'Ошибка при обновлении профиля: ' + (error instanceof Error ? error.message : 'Неизвестная ошибка'), type: 'error' });
+      setHasApiError(true);
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (!user) {
+  if (!userData) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-64px)]">
         <div className="text-center">
@@ -225,8 +283,16 @@ const ProfilePage: React.FC = () => {
     );
   };
 
+  // Render profile page
   return (
     <div className="container mx-auto px-4 py-8">
+      {hasApiError && (
+        <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4" role="alert">
+          <p className="font-bold">Внимание</p>
+          <p>Не удалось подключиться к API. Страница работает в демонстрационном режиме.</p>
+        </div>
+      )}
+      
       <div className="max-w-6xl mx-auto">
         <div className="bg-white rounded-lg shadow p-6 mb-8">
           <h1 className="text-2xl font-bold text-gray-900 mb-6">Профиль пользователя</h1>
@@ -238,15 +304,16 @@ const ProfilePage: React.FC = () => {
           )}
 
           {isEditing ? (
-            // Форма редактирования профиля
+            // Edit profile form
             <form onSubmit={handleSubmit}>
               <div className="flex flex-col sm:flex-row gap-6 mb-6">
                 <div className="w-full sm:w-1/3">
                   <div className="avatar-upload mx-auto">
                     <div className="avatar-preview">
                       <img 
-                        src={avatarPreview || user.avatarUrl || '/images/default-avatar.png'} 
-                        alt={user.fullName || 'User'} 
+                        src={avatarPreview || userData.avatarUrl || '/images/default-avatar.png'} 
+                        alt={userData.fullName || 'User'} 
+                        className="w-full h-full object-cover"
                       />
                     </div>
                     <div className="avatar-edit">
@@ -288,7 +355,7 @@ const ProfilePage: React.FC = () => {
                     <input
                       id="email"
                       type="email"
-                      value={user.email}
+                      value={userData.email}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100"
                       disabled
                     />
@@ -300,7 +367,7 @@ const ProfilePage: React.FC = () => {
                       Роль
                     </label>
                     <div className="px-3 py-2 border border-gray-300 rounded-md bg-gray-100">
-                      {user.role === 'author' ? 'Автор' : 'Пользователь'}
+                      {userData.role === 'author' ? 'Автор' : 'Пользователь'}
                     </div>
                   </div>
                 </div>
@@ -325,14 +392,14 @@ const ProfilePage: React.FC = () => {
               </div>
             </form>
           ) : (
-            // Просмотр профиля
+            // View profile
             <div>
               <div className="flex flex-col sm:flex-row gap-6 mb-6">
                 <div className="w-full sm:w-1/3">
                   <div className="w-32 h-32 rounded-full overflow-hidden mx-auto bg-gray-200">
                     <img 
-                      src={user.avatarUrl || '/images/default-avatar.png'} 
-                      alt={user.fullName || 'User'} 
+                      src={userData.avatarUrl || '/images/default-avatar.png'} 
+                      alt={userData.fullName || 'User'} 
                       className="w-full h-full object-cover"
                     />
                   </div>
@@ -340,10 +407,10 @@ const ProfilePage: React.FC = () => {
                 
                 <div className="w-full sm:w-2/3">
                   <div className="mb-6">
-                    <h2 className="text-xl font-semibold text-gray-900">{user.fullName}</h2>
-                    <p className="text-gray-600">{user.email}</p>
+                    <h2 className="text-xl font-semibold text-gray-900">{userData.fullName}</h2>
+                    <p className="text-gray-600">{userData.email}</p>
                     <p className="text-gray-500 mt-1">
-                      {user.role === 'author' ? 'Автор курсов' : 'Пользователь'}
+                      {userData.role === 'author' ? 'Автор курсов' : 'Пользователь'}
                     </p>
                   </div>
                   
@@ -352,15 +419,15 @@ const ProfilePage: React.FC = () => {
                     <div className="flex flex-wrap gap-4">
                       <div className="bg-gray-100 p-4 rounded-md">
                         <p className="text-sm text-gray-600">Активные курсы</p>
-                        <p className="text-xl font-bold text-gray-900">{user.stats?.activeCourses || 0}</p>
+                        <p className="text-xl font-bold text-gray-900">{userData.stats?.activeCourses || 0}</p>
                       </div>
                       <div className="bg-gray-100 p-4 rounded-md">
                         <p className="text-sm text-gray-600">Завершенные курсы</p>
-                        <p className="text-xl font-bold text-gray-900">{user.stats?.completedCourses || 0}</p>
+                        <p className="text-xl font-bold text-gray-900">{userData.stats?.completedCourses || 0}</p>
                       </div>
                       <div className="bg-gray-100 p-4 rounded-md">
                         <p className="text-sm text-gray-600">Средний балл</p>
-                        <p className="text-xl font-bold text-gray-900">{user.stats?.avgScore?.toFixed(1) || '0.0'}</p>
+                        <p className="text-xl font-bold text-gray-900">{userData.stats?.avgScore?.toFixed(1) || '0.0'}</p>
                       </div>
                     </div>
                   </div>
@@ -379,7 +446,7 @@ const ProfilePage: React.FC = () => {
           )}
         </div>
         
-        {/* Табы с курсами */}
+        {/* Course tabs */}
         <div className="profile-tabs">
           <div 
             className={`profile-tab ${activeTab === ProfileTab.ActiveCourses ? 'active' : ''}`}
@@ -393,7 +460,7 @@ const ProfilePage: React.FC = () => {
           >
             Завершенные курсы
           </div>
-          {user.role === 'author' && (
+          {userData.role === 'author' && (
             <div 
               className={`profile-tab ${activeTab === ProfileTab.CreatedCourses ? 'active' : ''}`}
               onClick={() => setActiveTab(ProfileTab.CreatedCourses)}
@@ -403,7 +470,7 @@ const ProfilePage: React.FC = () => {
           )}
         </div>
         
-        {/* Содержимое активного таба */}
+        {/* Active tab content */}
         {renderCoursesTab()}
       </div>
     </div>

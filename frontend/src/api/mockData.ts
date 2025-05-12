@@ -124,6 +124,21 @@ export const mockCourses: Course[] = [
   }
 ];
 
+// Add this to src/api/mockData.ts
+
+export const mockUser = {
+  id: "user-123",
+  email: "test@example.com",
+  fullName: "Тестовый Пользователь",
+  avatarUrl: null,
+  role: "user",
+  stats: {
+    activeCourses: 2,
+    completedCourses: 1,
+    avgScore: 85.5
+  }
+};
+
 // Modify the coursesApi.ts file to use mock data
 // You'll replace this with actual API calls later
 

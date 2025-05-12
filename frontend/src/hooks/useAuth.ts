@@ -13,29 +13,42 @@ export function useAuth() {
         setUser(JSON.parse(storedUser));
       } catch (e) {
         console.error('Failed to parse user data', e);
+        localStorage.removeItem('user'); // Clear invalid data
       }
     }
     setIsLoading(false);
   }, []);
 
-  // Функция для входа по email и паролю
-  const login = async (emailOrUser: string | User, password?: string): Promise<User> => {
-    // Если первый аргумент - объект User, то просто обновляем состояние
-    if (typeof emailOrUser === 'object') {
-      setUser(emailOrUser);
-      return emailOrUser;
+  const login = async (email: string, password: string): Promise<User> => {
+    try {
+      // Call API login function
+      const response = await apiLogin({ email, password });
+      // Make sure user data is stored in localStorage
+      if (response) {
+        setUser(response);
+        localStorage.setItem('user', JSON.stringify(response));
+      }
+      return response;
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
     }
-    
-    // Иначе выполняем вход с email и password
-    const userData = await apiLogin({ email: emailOrUser, password: password! });
-    setUser(userData);
-    return userData;
   };
 
   const register = async (email: string, password: string, fullName: string): Promise<User> => {
-    const userData = await apiRegister({ email, password, fullName });
-    setUser(userData);
-    return userData;
+    try {
+      // Call API register function
+      const userData = await apiRegister({ email, password, fullName });
+      // Make sure user data is stored in localStorage
+      if (userData) {
+        setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
+      }
+      return userData;
+    } catch (error) {
+      console.error('Register error:', error);
+      throw error;
+    }
   };
 
   const logout = () => {
@@ -43,7 +56,7 @@ export function useAuth() {
     setUser(null);
   };
 
-  // Функция для обновления состояния пользователя (без API-запроса)
+  // Function to update user state without API request
   const updateUserState = (updatedUser: User) => {
     setUser(updatedUser);
     localStorage.setItem('user', JSON.stringify(updatedUser));

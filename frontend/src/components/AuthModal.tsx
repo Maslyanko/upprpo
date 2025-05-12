@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { login, register } from '../api/authApi';
+import { useAuth } from '../hooks/useAuth';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -9,6 +9,7 @@ interface AuthModalProps {
 }
 
 const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
+  const { login, register } = useAuth();
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
@@ -25,16 +26,19 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSuccess }
 
     try {
       if (isLoginMode) {
-        await login({ email, password });
+        await login(email, password);
       } else {
         if (password !== confirmPassword) {
           throw new Error('Пароли не совпадают');
         }
-        await register({ email, password, fullName });
+        await register(email, password, fullName);
       }
+      
       onLoginSuccess();
       onClose();
-      navigate('/');
+      
+      // Force reload to ensure state is refreshed everywhere
+      window.location.href = '/';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Произошла ошибка');
     } finally {
