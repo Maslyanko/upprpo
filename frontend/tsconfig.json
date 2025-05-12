@@ -1,7 +1,45 @@
+// ===== ./tsconfig.json =====
 {
-  "files": [],
-  "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ]
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler", // or "node" if using older setup
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /* Path Aliases */
+    "baseUrl": ".", // Important for paths to work
+    "paths": {
+      "@/*": ["./src/*"] // Tell TS that @/* maps to ./src/*
+    }
+  },
+  "include": ["src", "**/*.ts", "**/*.tsx"], // Ensure it includes src
+  "references": [{ "path": "./tsconfig.node.json" }] // Keep if you have this
 }
+
+// You might also have a tsconfig.node.json, keep it as is, e.g.:
+// ===== ./tsconfig.node.json =====
+// {
+//   "compilerOptions": {
+//     "composite": true,
+//     "skipLibCheck": true,
+//     "module": "ESNext",
+//     "moduleResolution": "bundler", // or "node"
+//     "allowSyntheticDefaultImports": true
+//   },
+//   "include": ["vite.config.ts"]
+// }

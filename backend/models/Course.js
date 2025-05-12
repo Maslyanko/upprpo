@@ -1,5 +1,84 @@
+// ===== ./backend/models/Course.js =====
 const db = require('../config/db');
-const { v4: uuidv4 } = require('uuid');
+const { v4: uuidv4 } = require('uuid'); // Keep if used for lessons/questions internally
+
+/**
+ * Получение тегов курса (Helper Function)
+ * @param {string} courseId - ID курса
+ * @returns {Promise<Array>} - Массив тегов
+ */
+const getCourseTags = async (courseId) => {
+    const result = await db.query(
+        'SELECT tag FROM course_tags WHERE course_id = $1 ORDER BY tag', // Added ORDER BY for consistency
+        [courseId]
+    );
+    return result.rows.map(row => row.tag);
+};
+
+/**
+ * Получение уроков курса (Summary) (Helper Function)
+ * @param {string} courseId - ID курса
+ * @returns {Promise<Array>} - Массив уроков (summary)
+ */
+const getCourseLessons = async (courseId) => {
+    const result = await db.query(
+        `SELECT
+          l.id,
+          l.title,
+          l.type,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM questions q WHERE q.lesson_id = l.id
+          ) THEN true ELSE false END AS has_quiz
+         FROM
+          lessons l
+         WHERE
+          l.course_id = $1
+         ORDER BY
+          l.sort_order`,
+        [courseId]
+    );
+    // Map to ensure consistent keys (camelCase) expected by frontend
+    return result.rows.map(row => ({
+        id: row.id,
+        title: row.title,
+        type: row.type, // Assuming 'Theory' / 'Coding' match enum
+        hasQuiz: row.has_quiz
+    }));
+};
+
+/**
+ * Форматирование данных курса для API (Helper Function)
+ * @param {Object} courseData - Данные курса из базы (row)
+ * @param {Array} tags - Теги курса
+ * @param {Array} lessons - Уроки курса (summary)
+ * @returns {Object} - Форматированные данные курса
+ */
+const formatCourseData = (courseData, tags, lessons) => {
+    // Ensure stats are numbers and handle nulls gracefully
+    const stats = {
+        enrollments: parseInt(courseData.enrollments, 10) || 0,
+        avgCompletion: parseFloat(courseData.avg_completion) || 0,
+        avgScore: parseFloat(courseData.avg_score) || 0.0 // Default to 0.0
+    };
+
+    return {
+        id: courseData.id,
+        authorId: courseData.author_id,
+        authorName: courseData.author_name, // Comes from JOIN in queries
+        title: courseData.title,
+        description: courseData.description,
+        difficulty: courseData.difficulty, // Ensure matches 'Beginner', 'Middle', 'Senior'
+        language: courseData.language,
+        coverUrl: courseData.cover_url,
+        tags: tags || [], // Ensure tags is always an array
+        estimatedDuration: courseData.estimated_duration, // Frontend handles null if needed
+        version: courseData.version,
+        isPublished: courseData.is_published,
+        stats: stats,
+        lessons: lessons || [] // Ensure lessons is always an array
+    };
+};
+
 
 /**
  * Получение всех курсов с фильтрацией
@@ -7,110 +86,120 @@ const { v4: uuidv4 } = require('uuid');
  * @returns {Promise<Array>} - Массив курсов
  */
 const findAll = async (filters = {}) => {
-  const { search, difficulty, sort, tags = [] } = filters;
-  
-  let query = `
-    SELECT 
-      c.id, 
-      c.author_id, 
-      u.full_name AS author_name,
-      c.title, 
-      c.description, 
-      c.difficulty, 
-      c.language, 
-      c.cover_url, 
-      c.estimated_duration, 
-      c.version, 
-      c.is_published,
-      COALESCE(cs.enrollments, 0) AS enrollments, 
-      COALESCE(cs.avg_completion, 0) AS avg_completion, 
-      COALESCE(cs.avg_score, 0) AS avg_score
-    FROM 
-      courses c
-    JOIN 
-      users u ON c.author_id = u.id
-    LEFT JOIN 
-      course_stats cs ON c.id = cs.course_id
-  `;
-  
-  const whereConditions = [];
-  const values = [];
-  let valueCounter = 1;
-  
-  // Фильтрация по опубликованным курсам (по умолчанию)
-  whereConditions.push(`c.is_published = true`);
-  
-  // Поиск по тексту
-  if (search) {
-    whereConditions.push(`(
-      c.title ILIKE $${valueCounter} 
-      OR u.full_name ILIKE $${valueCounter} 
-      OR EXISTS (
-        SELECT 1 FROM course_tags ct 
-        WHERE ct.course_id = c.id AND ct.tag ILIKE $${valueCounter}
-      )
-    )`);
-    values.push(`%${search}%`);
-    valueCounter++;
-  }
-  
-  // Фильтрация по сложности
-  if (difficulty) {
-    whereConditions.push(`c.difficulty = $${valueCounter}`);
-    values.push(difficulty);
-    valueCounter++;
-  }
-  
-  // Фильтрация по тегам
-  if (tags.length > 0) {
-    const placeholders = tags.map((_, idx) => `$${valueCounter + idx}`).join(', ');
-    whereConditions.push(`EXISTS (
-      SELECT 1 FROM course_tags ct 
-      WHERE ct.course_id = c.id AND ct.tag IN (${placeholders})
-    )`);
-    values.push(...tags);
-    valueCounter += tags.length;
-  }
-  
-  if (whereConditions.length > 0) {
-    query += ` WHERE ${whereConditions.join(' AND ')}`;
-  }
-  
-  // Сортировка
-  if (sort) {
-    switch (sort) {
-      case 'popularity':
-        query += ` ORDER BY enrollments DESC`;
-        break;
-      case 'difficulty':
-        query += ` ORDER BY CASE 
-          WHEN c.difficulty = 'Beginner' THEN 1 
-          WHEN c.difficulty = 'Middle' THEN 2 
-          WHEN c.difficulty = 'Senior' THEN 3 
-          ELSE 4 
-        END`;
-        break;
-      case 'duration':
-        query += ` ORDER BY c.estimated_duration DESC`;
-        break;
-      default:
-        query += ` ORDER BY c.created_at DESC`;
+    const { search, difficulty, sort, tags = [], language } = filters; // Added language filter support
+
+    let query = `
+      SELECT
+        c.id,
+        c.author_id,
+        u.full_name AS author_name,
+        c.title,
+        c.description,
+        c.difficulty,
+        c.language,
+        c.cover_url,
+        c.estimated_duration,
+        c.version,
+        c.is_published,
+        COALESCE(cs.enrollments, 0) AS enrollments,
+        COALESCE(cs.avg_completion, 0) AS avg_completion,
+        COALESCE(cs.avg_score, 0) AS avg_score
+      FROM
+        courses c
+      JOIN
+        users u ON c.author_id = u.id
+      LEFT JOIN
+        course_stats cs ON c.id = cs.course_id
+    `;
+
+    const whereConditions = [];
+    const values = [];
+    let valueCounter = 1;
+
+    // Default: Only show published courses unless specifically requested otherwise (e.g., for authors)
+    whereConditions.push(`c.is_published = true`);
+
+    // Search
+    if (search) {
+        whereConditions.push(`(
+          c.title ILIKE $${valueCounter}
+          OR c.description ILIKE $${valueCounter}
+          OR u.full_name ILIKE $${valueCounter}
+          OR EXISTS (
+            SELECT 1 FROM course_tags ct
+            WHERE ct.course_id = c.id AND ct.tag ILIKE $${valueCounter}
+          )
+        )`);
+        values.push(`%${search}%`);
+        valueCounter++;
     }
-  } else {
-    query += ` ORDER BY c.created_at DESC`;
-  }
-  
-  const result = await db.query(query, values);
-  
-  // Получаем теги для каждого курса
-  const courses = await Promise.all(result.rows.map(async course => {
-    const tags = await getCourseTags(course.id);
-    const lessons = await getCourseLessons(course.id);
-    
-    return formatCourseData(course, tags, lessons);
-  }));
-  
-  return courses;
+
+    // Difficulty Filter
+    if (difficulty) {
+        whereConditions.push(`c.difficulty = $${valueCounter}`);
+        values.push(difficulty);
+        valueCounter++;
+    }
+
+    // Language Filter
+    if (language) {
+        whereConditions.push(`c.language = $${valueCounter}`);
+        values.push(language);
+        valueCounter++;
+    }
+
+    // Tags Filter (using ANY for array matching)
+    if (tags.length > 0) {
+      // Ensure tags are passed as a single array parameter
+      whereConditions.push(`EXISTS (
+          SELECT 1 FROM course_tags ct
+          WHERE ct.course_id = c.id AND ct.tag = ANY($${valueCounter})
+      )`);
+      values.push(tags); // Pass the whole array as one parameter
+      valueCounter++;
+    }
+
+
+    if (whereConditions.length > 0) {
+        query += ` WHERE ${whereConditions.join(' AND ')}`;
+    }
+
+    // Sorting
+    let orderByClause = ` ORDER BY c.created_at DESC`; // Default sort
+    if (sort) {
+        switch (sort) {
+            case 'popularity':
+                orderByClause = ` ORDER BY enrollments DESC, c.created_at DESC`; // Added secondary sort
+                break;
+            case 'difficulty':
+                orderByClause = ` ORDER BY CASE
+                  WHEN c.difficulty = 'Beginner' THEN 1
+                  WHEN c.difficulty = 'Middle' THEN 2
+                  WHEN c.difficulty = 'Senior' THEN 3
+                  ELSE 4
+                END, c.created_at DESC`; // Added secondary sort
+                break;
+            case 'duration': // Assuming duration means estimated_duration
+                orderByClause = ` ORDER BY c.estimated_duration DESC NULLS LAST, c.created_at DESC`; // Handle NULLs, added secondary
+                break;
+            // Add other sort options if needed
+        }
+    }
+    query += orderByClause;
+
+    console.log("Executing Course FindAll Query:", query);
+    console.log("Query Values:", values);
+
+    const result = await db.query(query, values);
+
+    // Fetch tags and lessons summary for each course
+    const courses = await Promise.all(result.rows.map(async courseRow => {
+        const courseTags = await getCourseTags(courseRow.id);
+        const courseLessons = await getCourseLessons(courseRow.id);
+        return formatCourseData(courseRow, courseTags, courseLessons);
+    }));
+
+    return courses;
 };
 
 /**
@@ -120,542 +209,415 @@ const findAll = async (filters = {}) => {
  * @returns {Promise<Object|null>} - Найденный курс или null
  */
 const findById = async (id, version = null) => {
-  let query = `
-    SELECT 
-      c.id, 
-      c.author_id, 
-      u.full_name AS author_name,
-      c.title, 
-      c.description, 
-      c.difficulty, 
-      c.language, 
-      c.cover_url, 
-      c.estimated_duration, 
-      c.version, 
-      c.is_published,
-      COALESCE(cs.enrollments, 0) AS enrollments, 
-      COALESCE(cs.avg_completion, 0) AS avg_completion, 
-      COALESCE(cs.avg_score, 0) AS avg_score
-    FROM 
-      courses c
-    JOIN 
-      users u ON c.author_id = u.id
-    LEFT JOIN 
-      course_stats cs ON c.id = cs.course_id
-    WHERE c.id = $1
-  `;
-  
-  const values = [id];
-  
-  if (version) {
-    query += ` AND c.version = $2`;
-    values.push(version);
-  }
-  
-  const result = await db.query(query, values);
-  
-  if (result.rows.length === 0) {
-    return null;
-  }
-  
-  const course = result.rows[0];
-  const tags = await getCourseTags(id);
-  const lessons = await getCourseLessons(id);
-  
-  return formatCourseData(course, tags, lessons);
+    let query = `
+      SELECT
+        c.id,
+        c.author_id,
+        u.full_name AS author_name,
+        c.title,
+        c.description,
+        c.difficulty,
+        c.language,
+        c.cover_url,
+        c.estimated_duration,
+        c.version,
+        c.is_published,
+        COALESCE(cs.enrollments, 0) AS enrollments,
+        COALESCE(cs.avg_completion, 0) AS avg_completion,
+        COALESCE(cs.avg_score, 0) AS avg_score
+      FROM
+        courses c
+      JOIN
+        users u ON c.author_id = u.id
+      LEFT JOIN
+        course_stats cs ON c.id = cs.course_id
+      WHERE c.id = $1
+    `;
+
+    const values = [id];
+
+    if (version) {
+        query += ` AND c.version = $2`;
+        values.push(version);
+    } else {
+        // If no specific version requested, usually get the latest published or the draft
+        // For simplicity, let's assume getting *any* version by ID is okay for now.
+        // More complex logic might be needed (e.g., get highest version number).
+    }
+
+     // Limit to 1 in case multiple versions exist and no specific one was asked for
+    query += ` ORDER BY c.version DESC LIMIT 1`;
+
+    const result = await db.query(query, values);
+
+    if (result.rows.length === 0) {
+        return null;
+    }
+
+    const courseRow = result.rows[0];
+    const tags = await getCourseTags(id); // Use the found course's ID
+    const lessons = await getCourseLessons(id); // Use the found course's ID
+
+    return formatCourseData(courseRow, tags, lessons);
 };
 
 /**
- * Создание нового курса
- * @param {Object} courseData - Данные курса
+ * Создание нового курса (черновик)
+ * @param {Object} courseData - Данные курса (title, description, difficulty, etc.)
  * @param {string} authorId - ID автора
  * @returns {Promise<Object>} - Созданный курс
  */
 const create = async (courseData, authorId) => {
-  const { title, description, difficulty, language, tags = [], lessons = [] } = courseData;
-  
-  // Транзакция для создания курса и связанных данных
-  const client = await db.pool.connect();
-  
-  try {
-    await client.query('BEGIN');
-    
-    // Создаем курс
-    const courseResult = await client.query(
-      `INSERT INTO courses 
-        (author_id, title, description, difficulty, language, version, is_published) 
-       VALUES 
-        ($1, $2, $3, $4, $5, $6, $7) 
-       RETURNING *`,
-      [authorId, title, description, difficulty, language, 1, false]
-    );
-    
-    const course = courseResult.rows[0];
-    
-    // Создаем начальную статистику курса
-    await client.query(
-      `INSERT INTO course_stats 
-        (course_id, enrollments, avg_completion, avg_score) 
-       VALUES 
-        ($1, $2, $3, $4)`,
-      [course.id, 0, 0, 0]
-    );
-    
-    // Добавляем теги
-    if (tags.length > 0) {
-      const tagValues = tags.map(tag => `('${course.id}', '${tag}')`).join(', ');
-      await client.query(
-        `INSERT INTO course_tags (course_id, tag) VALUES ${tagValues}`
-      );
-    }
-    
-    // Добавляем уроки
-    if (lessons.length > 0) {
-      for (let i = 0; i < lessons.length; i++) {
-        const lesson = lessons[i];
-        
-        // Создаем урок
-        const lessonResult = await client.query(
-          `INSERT INTO lessons 
-            (course_id, title, type, sort_order) 
-           VALUES 
-            ($1, $2, $3, $4) 
-           RETURNING *`,
-          [course.id, lesson.title, lesson.type, i]
+    const {
+        title,
+        description,
+        difficulty,
+        language = null, // Default to null if not provided
+        tags = [],
+        lessons = [], // Expect full lesson structure for creation
+        coverUrl = null, // Allow setting cover URL during creation
+        estimatedDuration = null // Allow setting duration
+    } = courseData;
+
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Create course record (version 1, unpublished)
+        const courseResult = await client.query(
+            `INSERT INTO courses
+              (author_id, title, description, difficulty, language, cover_url, estimated_duration, version, is_published)
+             VALUES
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             RETURNING *`,
+            [authorId, title, description, difficulty, language, coverUrl, estimatedDuration, 1, false] // Start as unpublished draft
         );
-        
-        const createdLesson = lessonResult.rows[0];
-        
-        // Добавляем содержимое урока
-        if (lesson.content) {
-          await client.query(
-            `INSERT INTO lesson_content 
-              (lesson_id, content, video_url) 
-             VALUES 
-              ($1, $2, $3)`,
-            [createdLesson.id, lesson.content, lesson.videoUrl || null]
-          );
-        }
-        
-        // Добавляем вопросы для квиза
-        if (lesson.quiz && lesson.quiz.length > 0) {
-          for (let j = 0; j < lesson.quiz.length; j++) {
-            const question = lesson.quiz[j];
-            
-            // Создаем вопрос
-            const questionResult = await client.query(
-              `INSERT INTO questions 
-                (lesson_id, text, type, sort_order) 
-               VALUES 
-                ($1, $2, $3, $4) 
-               RETURNING *`,
-              [createdLesson.id, question.text, question.type, j]
+        const course = courseResult.rows[0];
+        const courseId = course.id;
+
+        // 2. Create initial course stats
+        await client.query(
+            `INSERT INTO course_stats (course_id, enrollments, avg_completion, avg_score) VALUES ($1, 0, 0, 0)`,
+            [courseId]
+        );
+
+        // 3. Add tags
+        if (tags.length > 0) {
+            const tagValues = tags.map((tag, index) => `($1, $${index + 2})`).join(', ');
+            const tagParams = [courseId, ...tags];
+            await client.query(
+                `INSERT INTO course_tags (course_id, tag) VALUES ${tagValues}`,
+                tagParams
             );
-            
-            const createdQuestion = questionResult.rows[0];
-            
-            // Добавляем варианты ответов для вопросов с выбором
-            if (question.type === 'choice' && question.options && question.options.length > 0) {
-              for (let k = 0; k < question.options.length; k++) {
-                const option = question.options[k];
-                
-                await client.query(
-                  `INSERT INTO question_options 
-                    (question_id, label, sort_order) 
-                   VALUES 
-                    ($1, $2, $3)`,
-                  [createdQuestion.id, option.label, k]
-                );
-              }
-            }
-          }
         }
-      }
+
+        // 4. Add lessons and their content/quizzes
+        if (lessons.length > 0) {
+            for (let i = 0; i < lessons.length; i++) {
+                const lesson = lessons[i];
+                const lessonResult = await client.query(
+                    `INSERT INTO lessons (course_id, title, type, sort_order) VALUES ($1, $2, $3, $4) RETURNING id`,
+                    [courseId, lesson.title, lesson.type, i]
+                );
+                const lessonId = lessonResult.rows[0].id;
+
+                // Add lesson content
+                await client.query(
+                    `INSERT INTO lesson_content (lesson_id, content, video_url) VALUES ($1, $2, $3)`,
+                    [lessonId, lesson.content || '', lesson.videoUrl || null]
+                );
+
+                // Add quiz questions and options
+                if (lesson.quiz && lesson.quiz.length > 0) {
+                    for (let j = 0; j < lesson.quiz.length; j++) {
+                        const question = lesson.quiz[j];
+                        const questionResult = await client.query(
+                            `INSERT INTO questions (lesson_id, text, type, sort_order) VALUES ($1, $2, $3, $4) RETURNING id`,
+                            [lessonId, question.text, question.type, j]
+                        );
+                        const questionId = questionResult.rows[0].id;
+
+                        if (question.type === 'choice' && question.options && question.options.length > 0) {
+                            for (let k = 0; k < question.options.length; k++) {
+                                const option = question.options[k];
+                                await client.query(
+                                    `INSERT INTO question_options (question_id, label, is_correct, sort_order) VALUES ($1, $2, $3, $4)`,
+                                    // Assuming frontend might send 'is_correct', defaulting to false if not
+                                    [questionId, option.label, option.is_correct || false, k]
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+         // Recalculate estimated duration if not provided initially (optional)
+         if (estimatedDuration === null) {
+             const calculatedDuration = Math.ceil(lessons.length * 1.5); // Example calculation
+             await client.query('UPDATE courses SET estimated_duration = $1 WHERE id = $2', [calculatedDuration, courseId]);
+             course.estimated_duration = calculatedDuration; // Update object in memory
+         }
+
+
+        await client.query('COMMIT');
+
+        // Return the newly created course with details
+        return await findById(courseId); // Use findById to get formatted data
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Error creating course:", error);
+        throw error; // Re-throw the error for the controller
+    } finally {
+        client.release();
     }
-    
-    // Обновляем estimated_duration на основе количества уроков
-    const estimatedDuration = Math.ceil(lessons.length * 2); // Примерно 2 часа на урок
-    
-    await client.query(
-      `UPDATE courses SET estimated_duration = $1 WHERE id = $2`,
-      [estimatedDuration, course.id]
-    );
-    
-    await client.query('COMMIT');
-    
-    // Получаем полную информацию о курсе
-    return await findById(course.id);
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
 };
 
 /**
- * Обновление курса
+ * Обновление курса (только черновика)
  * @param {string} id - ID курса
  * @param {Object} updateData - Данные для обновления
  * @param {string} authorId - ID автора
  * @returns {Promise<Object>} - Обновленный курс
  */
 const update = async (id, updateData, authorId) => {
-  // Проверяем, существует ли курс и принадлежит ли он автору
-  const existingCourse = await db.query(
-    'SELECT * FROM courses WHERE id = $1 AND author_id = $2',
-    [id, authorId]
-  );
-  
-  if (existingCourse.rows.length === 0) {
-    throw new Error('Course not found or not authorized');
-  }
-  
-  const course = existingCourse.rows[0];
-  
-  // Проверяем, опубликован ли курс
-  if (course.is_published) {
-    throw new Error('Cannot update published course');
-  }
-  
-  const { title, description, difficulty, language, tags, lessons } = updateData;
-  
-  // Транзакция для обновления курса и связанных данных
-  const client = await db.pool.connect();
-  
-  try {
-    await client.query('BEGIN');
-    
-    // Обновляем основные данные курса
-    const updateFields = [];
-    const values = [];
-    let counter = 1;
-    
-    if (title !== undefined) {
-      updateFields.push(`title = $${counter}`);
-      values.push(title);
-      counter++;
-    }
-    
-    if (description !== undefined) {
-      updateFields.push(`description = $${counter}`);
-      values.push(description);
-      counter++;
-    }
-    
-    if (difficulty !== undefined) {
-      updateFields.push(`difficulty = $${counter}`);
-      values.push(difficulty);
-      counter++;
-    }
-    
-    if (language !== undefined) {
-      updateFields.push(`language = $${counter}`);
-      values.push(language);
-      counter++;
-    }
-    
-    if (updateFields.length > 0) {
-      values.push(id);
-      
-      await client.query(
-        `UPDATE courses SET ${updateFields.join(', ')} WHERE id = $${counter}`,
-        values
-      );
-    }
-    
-    // Обновляем теги
-    if (tags !== undefined) {
-      // Удаляем существующие теги
-      await client.query('DELETE FROM course_tags WHERE course_id = $1', [id]);
-      
-      // Добавляем новые теги
-      if (tags.length > 0) {
-        const tagValues = tags.map(tag => `('${id}', '${tag}')`).join(', ');
-        await client.query(
-          `INSERT INTO course_tags (course_id, tag) VALUES ${tagValues}`
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Check if course exists, belongs to author, and is unpublished
+        const courseCheck = await client.query(
+            'SELECT id, is_published FROM courses WHERE id = $1 AND author_id = $2',
+            [id, authorId]
         );
-      }
-    }
-    
-    // Обновляем уроки
-    if (lessons !== undefined) {
-      // Получаем существующие уроки
-      const existingLessons = await client.query(
-        'SELECT id FROM lessons WHERE course_id = $1',
-        [id]
-      );
-      
-      const existingLessonIds = existingLessons.rows.map(row => row.id);
-      
-      // Создаем или обновляем уроки
-      for (let i = 0; i < lessons.length; i++) {
-        const lesson = lessons[i];
-        
-        if (lesson.id && existingLessonIds.includes(lesson.id)) {
-          // Обновляем существующий урок
-          await client.query(
-            'UPDATE lessons SET title = $1, type = $2, sort_order = $3 WHERE id = $4',
-            [lesson.title, lesson.type, i, lesson.id]
-          );
-          
-          // Удаляем из списка существующих уроков
-          const index = existingLessonIds.indexOf(lesson.id);
-          if (index > -1) {
-            existingLessonIds.splice(index, 1);
-          }
-          
-          // Обновляем содержимое урока
-          if (lesson.content !== undefined) {
-            const contentExists = await client.query(
-              'SELECT 1 FROM lesson_content WHERE lesson_id = $1',
-              [lesson.id]
-            );
-            
-            if (contentExists.rows.length > 0) {
-              await client.query(
-                'UPDATE lesson_content SET content = $1, video_url = $2 WHERE lesson_id = $3',
-                [lesson.content, lesson.videoUrl || null, lesson.id]
-              );
-            } else {
-              await client.query(
-                'INSERT INTO lesson_content (lesson_id, content, video_url) VALUES ($1, $2, $3)',
-                [lesson.id, lesson.content, lesson.videoUrl || null]
-              );
-            }
-          }
-          
-          // Обновляем вопросы (удаляем старые и добавляем новые)
-          if (lesson.quiz !== undefined) {
-            await client.query('DELETE FROM questions WHERE lesson_id = $1', [lesson.id]);
-            
-            if (lesson.quiz && lesson.quiz.length > 0) {
-              for (let j = 0; j < lesson.quiz.length; j++) {
-                const question = lesson.quiz[j];
-                
-                // Создаем вопрос
-                const questionResult = await client.query(
-                  `INSERT INTO questions 
-                    (lesson_id, text, type, sort_order) 
-                   VALUES 
-                    ($1, $2, $3, $4) 
-                   RETURNING *`,
-                  [lesson.id, question.text, question.type, j]
-                );
-                
-                const createdQuestion = questionResult.rows[0];
-                
-                // Добавляем варианты ответов для вопросов с выбором
-                if (question.type === 'choice' && question.options && question.options.length > 0) {
-                  for (let k = 0; k < question.options.length; k++) {
-                    const option = question.options[k];
-                    
-                    await client.query(
-                      `INSERT INTO question_options 
-                        (question_id, label, sort_order) 
-                       VALUES 
-                        ($1, $2, $3)`,
-                      [createdQuestion.id, option.label, k]
-                    );
-                  }
-                }
-              }
-            }
-          }
-        } else {
-          // Создаем новый урок
-          const lessonResult = await client.query(
-            `INSERT INTO lessons 
-              (course_id, title, type, sort_order) 
-             VALUES 
-              ($1, $2, $3, $4) 
-             RETURNING *`,
-            [id, lesson.title, lesson.type, i]
-          );
-          
-          const createdLesson = lessonResult.rows[0];
-          
-          // Добавляем содержимое урока
-          if (lesson.content) {
-            await client.query(
-              `INSERT INTO lesson_content 
-                (lesson_id, content, video_url) 
-               VALUES 
-                ($1, $2, $3)`,
-              [createdLesson.id, lesson.content, lesson.videoUrl || null]
-            );
-          }
-          
-          // Добавляем вопросы для квиза
-          if (lesson.quiz && lesson.quiz.length > 0) {
-            for (let j = 0; j < lesson.quiz.length; j++) {
-              const question = lesson.quiz[j];
-              
-              // Создаем вопрос
-              const questionResult = await client.query(
-                `INSERT INTO questions 
-                  (lesson_id, text, type, sort_order) 
-                 VALUES 
-                  ($1, $2, $3, $4) 
-                 RETURNING *`,
-                [createdLesson.id, question.text, question.type, j]
-              );
-              
-              const createdQuestion = questionResult.rows[0];
-              
-              // Добавляем варианты ответов для вопросов с выбором
-              if (question.type === 'choice' && question.options && question.options.length > 0) {
-                for (let k = 0; k < question.options.length; k++) {
-                  const option = question.options[k];
-                  
-                  await client.query(
-                    `INSERT INTO question_options 
-                      (question_id, label, sort_order) 
-                     VALUES 
-                      ($1, $2, $3)`,
-                    [createdQuestion.id, option.label, k]
-                  );
-                }
-              }
-            }
-          }
+        if (courseCheck.rows.length === 0) {
+            throw new Error('Course not found or not authorized');
         }
-      }
-      
-      // Удаляем уроки, которых нет в обновленном списке
-      for (const lessonId of existingLessonIds) {
-        await client.query('DELETE FROM lessons WHERE id = $1', [lessonId]);
-      }
-      
-      // Обновляем estimated_duration на основе количества уроков
-      const estimatedDuration = Math.ceil(lessons.length * 2); // Примерно 2 часа на урок
-      
-      await client.query(
-        `UPDATE courses SET estimated_duration = $1 WHERE id = $2`,
-        [estimatedDuration, id]
-      );
+        if (courseCheck.rows[0].is_published) {
+            throw new Error('Cannot update published course');
+        }
+
+        const {
+            title, description, difficulty, language, tags, lessons, // Expect full lessons array for update
+            coverUrl, estimatedDuration
+        } = updateData;
+
+        // 2. Update basic course fields
+        const updateFields = [];
+        const values = [];
+        let counter = 1;
+
+        // Helper to add field to update query
+        const addUpdateField = (field, value) => {
+            if (value !== undefined) {
+                updateFields.push(`${field} = $${counter}`);
+                values.push(value);
+                counter++;
+            }
+        };
+
+        addUpdateField('title', title);
+        addUpdateField('description', description);
+        addUpdateField('difficulty', difficulty);
+        addUpdateField('language', language);
+        addUpdateField('cover_url', coverUrl);
+        addUpdateField('estimated_duration', estimatedDuration);
+
+        if (updateFields.length > 0) {
+            values.push(id); // Add course ID for WHERE clause
+            await client.query(
+                `UPDATE courses SET ${updateFields.join(', ')} WHERE id = $${counter}`,
+                values
+            );
+        }
+
+        // 3. Update tags (delete existing, insert new)
+        if (tags !== undefined) {
+            await client.query('DELETE FROM course_tags WHERE course_id = $1', [id]);
+            if (tags.length > 0) {
+                const tagValues = tags.map((tag, index) => `($1, $${index + 2})`).join(', ');
+                const tagParams = [id, ...tags];
+                await client.query(`INSERT INTO course_tags (course_id, tag) VALUES ${tagValues}`, tagParams);
+            }
+        }
+
+        // 4. Update lessons (complex: delete old, insert/update new)
+        if (lessons !== undefined) {
+             // Get IDs of lessons currently associated with the course
+             const existingLessonsResult = await client.query('SELECT id FROM lessons WHERE course_id = $1', [id]);
+             const existingLessonIds = new Set(existingLessonsResult.rows.map(r => r.id));
+             const updatedLessonIds = new Set();
+
+             // Iterate through lessons provided in the update
+            for (let i = 0; i < lessons.length; i++) {
+                const lesson = lessons[i];
+                let lessonId = lesson.id; // Use provided ID if exists
+
+                 if (lessonId && existingLessonIds.has(lessonId)) {
+                     // Update existing lesson
+                    await client.query(
+                        'UPDATE lessons SET title = $1, type = $2, sort_order = $3 WHERE id = $4',
+                        [lesson.title, lesson.type, i, lessonId]
+                    );
+                    updatedLessonIds.add(lessonId);
+                 } else {
+                     // Insert new lesson (ignore any incoming ID if it wasn't existing)
+                    const newLessonResult = await client.query(
+                        'INSERT INTO lessons (course_id, title, type, sort_order) VALUES ($1, $2, $3, $4) RETURNING id',
+                        [id, lesson.title, lesson.type, i]
+                    );
+                    lessonId = newLessonResult.rows[0].id; // Get the newly generated ID
+                    updatedLessonIds.add(lessonId);
+                 }
+
+                 // Update lesson content (upsert logic)
+                await client.query(
+                    `INSERT INTO lesson_content (lesson_id, content, video_url) VALUES ($1, $2, $3)
+                     ON CONFLICT (lesson_id) DO UPDATE SET content = EXCLUDED.content, video_url = EXCLUDED.video_url`,
+                    [lessonId, lesson.content || '', lesson.videoUrl || null]
+                );
+
+                 // Update quiz (delete all old questions for this lesson, insert new)
+                await client.query('DELETE FROM questions WHERE lesson_id = $1', [lessonId]);
+                if (lesson.quiz && lesson.quiz.length > 0) {
+                    for (let j = 0; j < lesson.quiz.length; j++) {
+                        const question = lesson.quiz[j];
+                        const questionResult = await client.query(
+                            'INSERT INTO questions (lesson_id, text, type, sort_order) VALUES ($1, $2, $3, $4) RETURNING id',
+                            [lessonId, question.text, question.type, j]
+                        );
+                        const questionId = questionResult.rows[0].id;
+
+                        if (question.type === 'choice' && question.options && question.options.length > 0) {
+                            for (let k = 0; k < question.options.length; k++) {
+                                const option = question.options[k];
+                                await client.query(
+                                    'INSERT INTO question_options (question_id, label, is_correct, sort_order) VALUES ($1, $2, $3, $4)',
+                                    [questionId, option.label, option.is_correct || false, k]
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Delete lessons that were previously associated but are not in the updated list
+            for (const existingId of existingLessonIds) {
+                if (!updatedLessonIds.has(existingId)) {
+                    await client.query('DELETE FROM lessons WHERE id = $1', [existingId]);
+                }
+            }
+
+             // Optional: Recalculate estimated duration based on new lesson count if not explicitly set
+             if (estimatedDuration === undefined) { // Only if duration wasn't part of the updateData
+                 const newDuration = Math.ceil(lessons.length * 1.5);
+                 await client.query('UPDATE courses SET estimated_duration = $1 WHERE id = $2', [newDuration, id]);
+             }
+        }
+
+
+        await client.query('COMMIT');
+
+        // Return the updated course details
+        return await findById(id);
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Error updating course:", error);
+        throw error; // Re-throw for controller
+    } finally {
+        client.release();
     }
-    
-    await client.query('COMMIT');
-    
-    // Получаем полную информацию о курсе
-    return await findById(id);
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
 };
 
 /**
- * Публикация курса
+ * Публикация курса (увеличивает версию)
  * @param {string} id - ID курса
  * @param {string} authorId - ID автора
  * @returns {Promise<Object>} - Опубликованный курс
  */
 const publish = async (id, authorId) => {
-  // Проверяем, существует ли курс и принадлежит ли он автору
-  const existingCourse = await db.query(
-    'SELECT * FROM courses WHERE id = $1 AND author_id = $2',
-    [id, authorId]
-  );
-  
-  if (existingCourse.rows.length === 0) {
-    throw new Error('Course not found or not authorized');
-  }
-  
-  const course = existingCourse.rows[0];
-  
-  // Увеличиваем версию и публикуем курс
-  await db.query(
-    'UPDATE courses SET is_published = true, version = version + 1 WHERE id = $1',
-    [id]
-  );
-  
-  // Получаем обновленный курс
-  return await findById(id);
+    // 1. Check if course exists and belongs to the author
+    const courseCheck = await db.query(
+        'SELECT id FROM courses WHERE id = $1 AND author_id = $2',
+        [id, authorId]
+    );
+    if (courseCheck.rows.length === 0) {
+        throw new Error('Course not found or not authorized');
+    }
+
+    // 2. Update course: set is_published = true, increment version
+    // NOTE: In a real system, publishing might involve creating a *new* course record
+    // with the incremented version, keeping the old one immutable.
+    // This simplified version updates the existing record.
+    const result = await db.query(
+        'UPDATE courses SET is_published = true, version = version + 1 WHERE id = $1 RETURNING id',
+        [id]
+    );
+
+    // 3. Return the newly published course details
+    return await findById(id);
 };
 
 /**
- * Получение тегов курса
- * @param {string} courseId - ID курса
- * @returns {Promise<Array>} - Массив тегов
+ * Получение курсов по ID автора
+ * @param {string} authorId - ID автора
+ * @returns {Promise<Array>} - Массив курсов автора
  */
-const getCourseTags = async (courseId) => {
-  const result = await db.query(
-    'SELECT tag FROM course_tags WHERE course_id = $1',
-    [courseId]
-  );
-  
-  return result.rows.map(row => row.tag);
+const findByAuthor = async (authorId) => {
+    const query = `
+      SELECT
+        c.id,
+        c.author_id,
+        u.full_name AS author_name,
+        c.title,
+        c.description,
+        c.difficulty,
+        c.language,
+        c.cover_url,
+        c.estimated_duration,
+        c.version,
+        c.is_published,
+        COALESCE(cs.enrollments, 0) AS enrollments,
+        COALESCE(cs.avg_completion, 0) AS avg_completion,
+        COALESCE(cs.avg_score, 0) AS avg_score
+      FROM
+        courses c
+      JOIN
+        users u ON c.author_id = u.id
+      LEFT JOIN
+        course_stats cs ON c.id = cs.course_id
+      WHERE
+        c.author_id = $1
+      ORDER BY
+        c.created_at DESC;
+    `;
+
+    const result = await db.query(query, [authorId]);
+
+    // Get tags and lessons for each course
+    const courses = await Promise.all(result.rows.map(async courseRow => {
+        const tags = await getCourseTags(courseRow.id);
+        const lessons = await getCourseLessons(courseRow.id);
+        return formatCourseData(courseRow, tags, lessons);
+    }));
+
+    return courses;
 };
 
-/**
- * Получение уроков курса
- * @param {string} courseId - ID курса
- * @returns {Promise<Array>} - Массив уроков
- */
-const getCourseLessons = async (courseId) => {
-  const result = await db.query(
-    `SELECT 
-      l.id, 
-      l.title, 
-      l.type,
-      CASE WHEN EXISTS (
-        SELECT 1 FROM questions q WHERE q.lesson_id = l.id
-      ) THEN true ELSE false END AS has_quiz
-     FROM 
-      lessons l
-     WHERE 
-      l.course_id = $1
-     ORDER BY 
-      l.sort_order`,
-    [courseId]
-  );
-  
-  return result.rows.map(row => ({
-    id: row.id,
-    title: row.title,
-    type: row.type,
-    hasQuiz: row.has_quiz
-  }));
-};
 
-/**
- * Форматирование данных курса для API
- * @param {Object} courseData - Данные курса из базы
- * @param {Array} tags - Теги курса
- * @param {Array} lessons - Уроки курса
- * @returns {Object} - Форматированные данные курса
- */
-const formatCourseData = (courseData, tags, lessons) => {
-  return {
-    id: courseData.id,
-    authorId: courseData.author_id,
-    authorName: courseData.author_name,
-    title: courseData.title,
-    description: courseData.description,
-    difficulty: courseData.difficulty,
-    language: courseData.language,
-    coverUrl: courseData.cover_url,
-    tags: tags,
-    estimatedDuration: courseData.estimated_duration,
-    version: courseData.version,
-    isPublished: courseData.is_published,
-    stats: {
-      enrollments: parseInt(courseData.enrollments) || 0,
-      avgCompletion: parseFloat(courseData.avg_completion) || 0,
-      avgScore: parseFloat(courseData.avg_score) || 0
-    },
-    lessons: lessons
-  };
-};
+// --- IMPORTANT: Define ALL functions before exporting ---
 
 module.exports = {
-  findAll,
-  findById,
-  create,
-  update,
-  publish
+    findAll,
+    findById, // Ensure this is defined ABOVE this line
+    create,
+    update,
+    publish,
+    findByAuthor,
+    // Export helpers ONLY if they are needed by other models (like Enrollment.js)
+    getCourseTags,
+    getCourseLessons,
+    formatCourseData
 };

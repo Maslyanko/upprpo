@@ -1,10 +1,22 @@
 import client from './client';
 import type { User } from '../types/User';
+import type { Course } from '../types/Course'; // Import Course type
 
 interface UpdateProfileData {
   fullName?: string;
   avatarUrl?: string | null;
 }
+
+// Interface for Enrollment data returned by the new endpoint
+export interface EnrollmentWithCourse {
+    status: 'inProgress' | 'completed';
+    progress: number;
+    startedAt: string;
+    finishedAt: string | null;
+    userRating: number | null; // User's rating for completed course
+    course: Course; // Full course details
+}
+
 
 /**
  * Get current user data
@@ -55,6 +67,38 @@ export async function uploadAvatar(formData: FormData): Promise<{ avatarUrl: str
     return response.data;
   } catch (error) {
     console.error('Error uploading avatar:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get user's enrollments by status
+ */
+export async function getMyEnrollments(status: 'inProgress' | 'completed'): Promise<EnrollmentWithCourse[]> {
+  console.log(`Getting enrollments with status: ${status}`);
+  try {
+    const response = await client.get<EnrollmentWithCourse[]>('/users/me/enrollments', {
+      params: { status }
+    });
+    console.log(`Enrollments received for status ${status}:`, response.data);
+    return response.data;
+  } catch (error) {
+    console.error(`Error getting enrollments for status ${status}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get courses created by the user
+ */
+export async function getMyCreatedCourses(): Promise<Course[]> {
+  console.log('Getting created courses');
+  try {
+    const response = await client.get<Course[]>('/users/me/courses');
+    console.log('Created courses received:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error getting created courses:', error);
     throw error;
   }
 }

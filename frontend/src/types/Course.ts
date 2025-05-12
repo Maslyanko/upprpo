@@ -1,7 +1,7 @@
 export interface LessonSummary {
   id: string;
   title: string;
-  type: 'Theory' | 'Coding';
+  type: 'Theory' | 'Coding'; // Ensure backend uses these exact strings
   hasQuiz: boolean;
 }
 
@@ -13,21 +13,20 @@ export interface CourseStats {
 
 export interface Course {
   id: string;
-  authorId?: string; // Добавлено согласно API
-  authorName: string;
-  coverUrl: string;
+  authorId?: string; // Included in backend model
+  authorName: string; // Included in backend model (joined from users)
+  coverUrl: string | null; // Make nullable if backend allows it
   title: string;
-  description?: string; // Добавлено согласно API
-  difficulty: 'Beginner' | 'Middle' | 'Senior';
-  language?: string;
-  tags: string[];
-  estimatedDuration: number; // в часах
-  version?: number; // Добавлено согласно API
-  isPublished?: boolean; // Добавлено согласно API
-  stats: CourseStats;
-  lessons: LessonSummary[];
+  description?: string; // Included in backend model
+  difficulty: 'Beginner' | 'Middle' | 'Senior'; // Ensure backend uses these exact strings
+  language?: string | null; // Make nullable
+  tags: string[]; // Included in backend model
+  estimatedDuration: number | null; // Make nullable
+  version?: number; // Included in backend model
+  isPublished?: boolean; // Included in backend model
+  stats: CourseStats; // Included in backend model
+  lessons: LessonSummary[]; // Included in backend model
 }
-
 // Модели для создания и обновления курсов
 export interface CourseBase {
   title: string;

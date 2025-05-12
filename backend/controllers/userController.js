@@ -1,4 +1,6 @@
 const User = require('../models/User');
+const Course = require('../models/Course'); // Add Course model
+const Enrollment = require('../models/Enrollment'); // Add Enrollment model
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
@@ -120,8 +122,64 @@ const uploadAvatar = async (req, res) => {
   }
 };
 
+/**
+ * Get user's enrollments by status
+ * @route GET /users/me/enrollments
+ */
+const getMyEnrollments = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { status } = req.query; // 'inProgress' or 'completed'
+
+    if (!status || !['inProgress', 'completed'].includes(status)) {
+      return res.status(400).json({
+        code: 'INVALID_STATUS',
+        message: 'Необходимо указать статус: inProgress или completed'
+      });
+    }
+
+    const enrollments = await Enrollment.findByUserAndStatus(userId, status);
+    res.status(200).json(enrollments);
+  } catch (error) {
+    console.error('Get enrollments error:', error);
+    res.status(500).json({
+      code: 'SERVER_ERROR',
+      message: 'Ошибка при получении записей на курсы'
+    });
+  }
+};
+
+/**
+ * Get courses created by the user
+ * @route GET /users/me/courses
+ */
+const getMyCreatedCourses = async (req, res) => {
+  try {
+    const authorId = req.user.id;
+
+    // Дополнительная проверка роли (хотя можно положиться на middleware)
+    if (req.user.role !== 'author') {
+       return res.status(403).json({
+           code: 'FORBIDDEN',
+           message: 'Доступно только авторам'
+       });
+    }
+
+    const courses = await Course.findByAuthor(authorId);
+    res.status(200).json(courses);
+  } catch (error) {
+    console.error('Get created courses error:', error);
+    res.status(500).json({
+      code: 'SERVER_ERROR',
+      message: 'Ошибка при получении созданных курсов'
+    });
+  }
+};
+
 module.exports = {
   getMe,
   updateMe,
-  uploadAvatar
+  uploadAvatar,
+  getMyEnrollments,     // <-- Add export
+  getMyCreatedCourses   // <-- Add export
 };
