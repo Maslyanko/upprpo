@@ -60,7 +60,6 @@ components:
 
   ########## СХЕМЫ ########################################################
   schemas:
-
     ## Auth & User ······················································
     RegisterRequest:
       type: object
@@ -92,7 +91,6 @@ components:
         email:     { type: string, format: email }
         fullName:  { type: string, example: Ivan Petrov }
         avatarUrl: { type: string, format: uri, nullable: true }
-        role:      { type: string, enum: [user, author], example: user }
         stats:     { $ref: '#/components/schemas/UserStats' }
 
     UserStats:
@@ -103,6 +101,16 @@ components:
         avgScore:         { type: number, example: 78.4 }
 
     ## Course & Lesson ··················································
+    Tag:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required: [id, name]
+
     CourseBase:
       type: object
       required: [title, description, difficulty]

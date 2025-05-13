@@ -14,19 +14,16 @@ const users = [
     email: 'ivan@example.com',
     password: 'password',
     fullName: 'Иван Иванов',
-    role: 'author'
   },
   {
     email: 'polina@example.com',
     password: 'password',
     fullName: 'Полина Смирнова',
-    role: 'author'
   },
   {
     email: 'user@example.com',
     password: 'password',
     fullName: 'Тестовый Пользователь',
-    role: 'user'
   }
 ];
 
@@ -165,10 +162,10 @@ async function seedDatabase() {
       const hashedPassword = await bcrypt.hash(user.password, 10);
       
       const result = await client.query(
-        `INSERT INTO users (email, password, full_name, role) 
-         VALUES ($1, $2, $3, $4) 
+        `INSERT INTO users (email, password, full_name) 
+         VALUES ($1, $2, $3) 
          RETURNING id`,
-        [user.email, hashedPassword, user.fullName, user.role]
+        [user.email, hashedPassword, user.fullName]
       );
       
       const userId = result.rows[0].id;
@@ -336,7 +333,7 @@ async function seedDatabase() {
     console.log('База данных успешно заполнена тестовыми данными!');
     console.log('\nДанные для входа:');
     for (const user of users) {
-      console.log(`- ${user.email}: ${user.password} (роль: ${user.role})`);
+      console.log(`- ${user.email}: ${user.password}`);
     }
   } catch (error) {
     await client.query('ROLLBACK');

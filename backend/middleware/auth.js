@@ -31,20 +31,6 @@ const protect = (req, res, next) => {
   next();
 };
 
-/**
- * Middleware to check if user is an author
- */
-const authorOnly = (req, res, next) => {
-  if (!req.user || req.user.role !== 'author') {
-    return res.status(403).json({
-      code: 'FORBIDDEN',
-      message: 'Доступ разрешен только авторам'
-    });
-  }
-  next();
-};
-
 module.exports = {
   protect,
-  authorOnly
 };

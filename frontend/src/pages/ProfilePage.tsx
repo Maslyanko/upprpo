@@ -118,8 +118,7 @@ const ProfilePage: React.FC = () => {
         case ProfileTab.ActiveCourses: setActiveEnrollments(await getMyEnrollments('inProgress')); break;
         case ProfileTab.CompletedCourses: setCompletedEnrollments(await getMyEnrollments('completed')); break;
         case ProfileTab.CreatedCourses:
-          if (userData.role === 'author') setCreatedCourses(await getMyCreatedCourses());
-          else setCreatedCourses([]);
+          setCreatedCourses(await getMyCreatedCourses());
           break;
       }
       console.log(`ProfilePage: loadTabData - Data loaded for ${activeTab}.`);
@@ -235,11 +234,10 @@ const ProfilePage: React.FC = () => {
           case ProfileTab.ActiveCourses: isEmpty = activeEnrollments.length === 0; emptyMessage = 'У вас пока нет активных курсов.'; content = activeEnrollments.map(enr => <ActiveCourseCard key={enr.course.id} enrollment={enr} />); break;
           case ProfileTab.CompletedCourses: isEmpty = completedEnrollments.length === 0; emptyMessage = 'У вас пока нет завершенных курсов.'; content = completedEnrollments.map(enr => <CompletedCourseCard key={enr.course.id} enrollment={enr} />); break;
           case ProfileTab.CreatedCourses:
-              if (userData.role !== 'author') { isEmpty = true; emptyMessage = 'Эта вкладка доступна только авторам.'; content = null; }
-              else { isEmpty = createdCourses.length === 0; emptyMessage = 'Вы пока не создали ни одного курса.'; content = createdCourses.map(course => <CreatedCourseCard key={course.id} course={course} />); }
+              isEmpty = createdCourses.length === 0; emptyMessage = 'Вы пока не создали ни одного курса.'; content = createdCourses.map(course => <CreatedCourseCard key={course.id} course={course} />);
               break;
       }
-      if (isEmpty) { return (<div className="text-center py-16 text-gray-500"><p>{emptyMessage}</p>{activeTab === ProfileTab.CreatedCourses && userData.role === 'author' && (<a href="/create-course" className="mt-4 inline-block px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600 text-sm font-medium">Создать курс</a>)}</div>); }
+      if (isEmpty) { return (<div className="text-center py-16 text-gray-500"><p>{emptyMessage}</p>{activeTab === ProfileTab.CreatedCourses && (<a href="/create-course" className="mt-4 inline-block px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600 text-sm font-medium">Создать курс</a>)}</div>); }
       // Grid layout for course cards
       return (<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">{content}</div>);
   };
@@ -323,7 +321,7 @@ const ProfilePage: React.FC = () => {
                 <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
                     <button onClick={() => setActiveTab(ProfileTab.ActiveCourses)} className={`whitespace-nowrap pb-3 pt-1 px-1 border-b-2 font-medium text-sm focus:outline-none ${activeTab === ProfileTab.ActiveCourses ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>Активные курсы</button>
                     <button onClick={() => setActiveTab(ProfileTab.CompletedCourses)} className={`whitespace-nowrap pb-3 pt-1 px-1 border-b-2 font-medium text-sm focus:outline-none ${activeTab === ProfileTab.CompletedCourses ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>Завершенные курсы</button>
-                    {userData.role === 'author' && (<button onClick={() => setActiveTab(ProfileTab.CreatedCourses)} className={`whitespace-nowrap pb-3 pt-1 px-1 border-b-2 font-medium text-sm focus:outline-none ${activeTab === ProfileTab.CreatedCourses ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>Мои созданные курсы</button>)}
+                    {<button onClick={() => setActiveTab(ProfileTab.CreatedCourses)} className={`whitespace-nowrap pb-3 pt-1 px-1 border-b-2 font-medium text-sm focus:outline-none ${activeTab === ProfileTab.CreatedCourses ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>Мои созданные курсы</button>}
                 </nav>
             </div>
             <div className="min-h-[200px]">

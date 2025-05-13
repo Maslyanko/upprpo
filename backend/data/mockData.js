@@ -8,7 +8,6 @@ const users = [
     password: '$2a$10$CwTycUXWue0Thq9StjUM0uQxTmLsYYo1xRySdvFXMccg5tpUALpre', // password: 'password'
     fullName: 'Иван Иванов',
     avatarUrl: null,
-    role: 'author',
     stats: {
       activeCourses: 2,
       completedCourses: 5,
@@ -21,7 +20,6 @@ const users = [
     password: '$2a$10$CwTycUXWue0Thq9StjUM0uQxTmLsYYo1xRySdvFXMccg5tpUALpre', // password: 'password'
     fullName: 'Полина Смирнова',
     avatarUrl: null,
-    role: 'author',
     stats: {
       activeCourses: 1,
       completedCourses: 3,
@@ -34,7 +32,6 @@ const users = [
     password: '$2a$10$CwTycUXWue0Thq9StjUM0uQxTmLsYYo1xRySdvFXMccg5tpUALpre', // password: 'password'
     fullName: 'Тестовый Пользователь',
     avatarUrl: null,
-    role: 'user',
     stats: {
       activeCourses: 3,
       completedCourses: 1,

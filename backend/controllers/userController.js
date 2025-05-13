@@ -158,12 +158,6 @@ const getMyCreatedCourses = async (req, res) => {
     const authorId = req.user.id;
 
     // Дополнительная проверка роли (хотя можно положиться на middleware)
-    if (req.user.role !== 'author') {
-       return res.status(403).json({
-           code: 'FORBIDDEN',
-           message: 'Доступно только авторам'
-       });
-    }
 
     const courses = await Course.findByAuthor(authorId);
     res.status(200).json(courses);

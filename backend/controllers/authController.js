@@ -7,7 +7,7 @@ const { generateToken } = require('../utils/jwt');
  */
 const register = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, fullName } = req.body;
 
     // Проверяем, существует ли уже пользователь с таким email
     const existingUser = await User.findByEmail(email);
@@ -65,7 +65,6 @@ const login = async (req, res) => {
     const token = generateToken({
       id: user.id, 
       email: user.email, 
-      role: user.role
     });
 
     // Форматируем данные пользователя для ответа (без пароля)

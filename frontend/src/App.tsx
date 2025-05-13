@@ -1,13 +1,12 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
-import CatalogPage from './pages/CatalogPage';
+import HomePage from './pages/HomePage'; // Updated import
 import ProfilePage from './pages/ProfilePage';
 import { useAuth } from './hooks/useAuth';
 
 // Placeholder pages
-const FeaturesPage = () => <div className="py-12 text-center">Страница в разработке</div>;
-const AboutPage = () => <div className="py-12 text-center">Страница в разработке</div>;
+const AboutPage = () => <div className="py-12 text-center">Страница "О нас" в разработке</div>;
 const CreateCoursePage = () => <div className="py-12 text-center">Страница создания курса в разработке</div>;
 
 // Protected route component
@@ -23,6 +22,9 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }
   
   if (!isAuthenticated) {
+    // Instead of redirecting to "/", which is now HomePage,
+    // you might want to open the AuthModal or redirect to a dedicated login page if you create one.
+    // For now, keeping it simple:
     return <Navigate to="/" replace />;
   }
   
@@ -38,7 +40,7 @@ const NotFoundPage = () => (
 );
 
 export default function App() {
-  const { isLoading } = useAuth();
+  const { isLoading } = useAuth(); // Auth loading
 
   if (isLoading) {
     return (
@@ -52,8 +54,8 @@ export default function App() {
     <BrowserRouter>
       <Layout>
         <Routes>
-          <Route path="/" element={<CatalogPage />} />
-          <Route path="/features" element={<FeaturesPage />} />
+          <Route path="/" element={<HomePage />} /> {/* Changed to HomePage */}
+          {/* <Route path="/features" element={<FeaturesPage />} /> // Removed as per original image */}
           <Route path="/about" element={<AboutPage />} />
           <Route 
             path="/profile" 

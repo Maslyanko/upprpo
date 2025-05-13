@@ -131,7 +131,6 @@ export const mockUser = {
   email: "test@example.com",
   fullName: "Тестовый Пользователь",
   avatarUrl: null,
-  role: "user",
   stats: {
     activeCourses: 2,
     completedCourses: 1,

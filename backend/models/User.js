@@ -61,8 +61,8 @@ const create = async (userData) => {
     
     // Создаем пользователя
     const userResult = await client.query(
-      'INSERT INTO users (email, password, full_name, role) VALUES ($1, $2, $3, $4) RETURNING *',
-      [email, hashedPassword, fullName, 'user']
+      'INSERT INTO users (email, password, full_name) VALUES ($1, $2, $3) RETURNING *',
+      [email, hashedPassword, fullName]
     );
     
     const user = userResult.rows[0];
@@ -137,7 +137,6 @@ const formatUserData = (userData) => {
     email: userData.email,
     fullName: userData.full_name,
     avatarUrl: userData.avatar_url,
-    role: userData.role,
     stats: {
       activeCourses: userData.active_courses || 0,
       completedCourses: userData.completed_courses || 0,
