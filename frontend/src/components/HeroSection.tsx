@@ -1,3 +1,4 @@
+// ===== ./src/components/HeroSection.tsx =====
 import React from 'react';
 
 interface HeroSectionProps {
@@ -18,7 +19,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onTagClick }) => {
   };
 
   return (
-    <div className="bg-orange-600 text-white flex flex-col items-center justify-center min-h-screen px-4 py-16 sm:py-24">
+    <div className="bg-orange text-white flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] px-4 py-12 sm:py-16"> {/* Adjusted min-h and padding */}
       <div className="text-center max-w-3xl">
         <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold mb-6">
           Подготовься к IT-собеседованию

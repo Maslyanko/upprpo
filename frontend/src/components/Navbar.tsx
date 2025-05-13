@@ -1,3 +1,4 @@
+// ===== ./src/components/Navbar.tsx =====
 import React, { useState, useEffect } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import AuthModal from './AuthModal';
@@ -29,7 +30,7 @@ const Navbar: React.FC = () => {
   }, [isHomePage]);
 
   const navClasses = isHomePage && !isScrolled
-    ? 'bg-orange-600 text-white'
+    ? 'bg-orange text-white' // Use default orange from config
     : 'bg-white text-gray-900 shadow-sm';
 
   const logoColor = isHomePage && !isScrolled ? 'text-white' : 'text-gray-900';
@@ -47,9 +48,9 @@ const Navbar: React.FC = () => {
       ? 'text-orange-50 hover:text-white'
       : 'text-gray-700 hover:text-orange-500'
   }`;
-  
+
   const mobileMenuIconColor = isHomePage && !isScrolled ? 'text-white hover:bg-orange-700' : 'text-gray-400 hover:text-gray-500 hover:bg-gray-100';
-  const mobilePanelClasses = isHomePage && !isScrolled ? 'bg-orange-600 text-white' : 'bg-white text-gray-900';
+  const mobilePanelClasses = isHomePage && !isScrolled ? 'bg-orange text-white' : 'bg-white text-gray-900'; // Use default orange
 
   const getMobileLinkClasses = (isActive: boolean) => {
     if (isHomePage && !isScrolled) {
@@ -69,11 +70,11 @@ const Navbar: React.FC = () => {
                 <span className={`text-2xl font-bold ${logoColor}`}>AI-Hunt</span>
               </NavLink>
               <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
-                <NavLink to="/" className={({ isActive }) => getLinkClasses(isActive)}>
-                  Курсы
-                </NavLink>
                 <NavLink to="/about" className={({ isActive }) => getLinkClasses(isActive)}>
                   О нас
+                </NavLink>
+                <NavLink to="/" className={({ isActive }) => getLinkClasses(isActive)}>
+                  Курсы
                 </NavLink>
                 {user && (
                   <NavLink to="/create-course" className={({ isActive }) => getLinkClasses(isActive)}>
@@ -136,11 +137,11 @@ const Navbar: React.FC = () => {
         {isMenuOpen && (
           <div className={`sm:hidden ${mobilePanelClasses}`}>
             <div className="pt-2 pb-3 space-y-1">
-              <NavLink to="/" className={({ isActive }) => getMobileLinkClasses(isActive)} onClick={() => setIsMenuOpen(false)}>
-                Курсы
-              </NavLink>
               <NavLink to="/about" className={({ isActive }) => getMobileLinkClasses(isActive)} onClick={() => setIsMenuOpen(false)}>
                 О нас
+              </NavLink>
+              <NavLink to="/" className={({ isActive }) => getMobileLinkClasses(isActive)} onClick={() => setIsMenuOpen(false)}>
+                Курсы
               </NavLink>
               {user && (
                 <NavLink to="/create-course" className={({ isActive }) => getMobileLinkClasses(isActive)} onClick={() => setIsMenuOpen(false)}>

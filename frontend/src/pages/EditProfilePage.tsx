@@ -1,4 +1,4 @@
-// ==== File: frontend/src/pages/EditProfilePage.tsx ====
+// ===== ./src/pages/EditProfilePage.tsx =====
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -11,7 +11,7 @@ const EditProfilePage: React.FC = () => {
 
   const [currentUserData, setCurrentUserData] = useState<User | null>(null);
   const [isFetching, setIsFetching] = useState(true); // For fetching current user data
-  
+
   const [fullName, setFullName] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -66,7 +66,7 @@ const EditProfilePage: React.FC = () => {
 
     try {
       let dataToUpdate: { fullName?: string; avatarUrl?: string } = {};
-      
+
       if (fullName.trim() !== (currentUserData.fullName || '').trim() && fullName.trim() !== '') {
         dataToUpdate.fullName = fullName.trim();
       }
@@ -78,7 +78,7 @@ const EditProfilePage: React.FC = () => {
         dataToUpdate.avatarUrl = avatarResponse.avatarUrl;
         setAvatarFile(null);
       }
-      
+
       if (Object.keys(dataToUpdate).length > 0) {
         const updatedUserFromApi = await updateProfile(dataToUpdate);
         updateUserState(updatedUserFromApi); // Update global auth state
@@ -101,7 +101,7 @@ const EditProfilePage: React.FC = () => {
   const handleCancel = () => {
     navigate('/profile'); // Navigate back to the main profile view
   };
-  
+
   if (isAuthLoading || isFetching) {
     return (<div className="flex justify-center items-center min-h-[calc(100vh-150px)]"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div></div>);
   }
@@ -148,8 +148,8 @@ const EditProfilePage: React.FC = () => {
                 className="hidden"
                 disabled={isUpdatingProfile}
               />
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 sm:h-5 sm:w-5">
+                <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
               </svg>
             </button>
           </div>
