@@ -1,11 +1,21 @@
 import React from 'react';
 
-const HeroSection: React.FC = () => {
+interface HeroSectionProps {
+  onTagClick: (tag: string) => void;
+}
+
+const HeroSection: React.FC<HeroSectionProps> = ({ onTagClick }) => {
   const tags = [
     '#Популярное', '#Python', '#ИскусственныйИнтеллект', '#SQL', '#JavaScript',
     '#ТаймМенеджмент', '#ДляНачинающих', '#Java', '#HTML', '#ПостроениеКарьерногоПути',
     '#СПрактикой', '#Docker', '#Креативность', '#БезОпыта'
   ];
+
+  const handleInternalTagClick = (fullTag: string) => {
+    // Remove '#' and pass the clean tag
+    const cleanTag = fullTag.startsWith('#') ? fullTag.substring(1) : fullTag;
+    onTagClick(cleanTag);
+  };
 
   return (
     <div className="bg-orange-600 text-white flex flex-col items-center justify-center min-h-screen px-4 py-16 sm:py-24">
@@ -20,12 +30,13 @@ const HeroSection: React.FC = () => {
         </p>
         <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
           {tags.map(tag => (
-            <span
+            <button
               key={tag}
-              className="bg-gray-900 bg-opacity-70 text-white text-xs sm:text-sm font-medium px-3 py-1.5 rounded-full cursor-pointer hover:bg-opacity-90 transition-opacity"
+              onClick={() => handleInternalTagClick(tag)}
+              className="bg-gray-900 bg-opacity-70 text-white text-xs sm:text-sm font-medium px-3 py-1.5 rounded-full cursor-pointer hover:bg-opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-orange-300 focus:ring-opacity-50"
             >
               {tag}
-            </span>
+            </button>
           ))}
         </div>
       </div>

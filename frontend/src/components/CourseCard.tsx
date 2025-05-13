@@ -70,11 +70,6 @@ const CourseCard: React.FC<CourseCardProps> = ({ course }) => {
           </div>
         </div>
       </Link>
-      {!isAuthenticated && (
-        <div className="mt-2 text-xs text-gray-500 text-center">
-          Войдите, чтобы просмотреть курс
-        </div>
-      )}
     </div>
   );
 };

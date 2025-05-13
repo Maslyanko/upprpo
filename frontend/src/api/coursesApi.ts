@@ -1,5 +1,6 @@
 import client from './client';
 import type { Course } from '../types/Course';
+import type { CourseFilters } from '../hooks/useCourses';
 
 // Изменить на false для использования настоящего API
 const USE_MOCK_DATA = false; 
@@ -73,7 +74,7 @@ export async function getCourses(params?: CourseParams): Promise<Course[]> {
     });
   } else {
     // Real API call
-    const apiParams: Record<string, string | string[]> = {};
+    const apiParams: Record<string, string | string[] | undefined> = {};
     
     // Map frontend params to API params
     if (params?.search) apiParams.search = params.search;
@@ -81,6 +82,9 @@ export async function getCourses(params?: CourseParams): Promise<Course[]> {
     if (params?.level) apiParams.difficulty = params.level; // Изменено на difficulty согласно API
     if (params?.language) apiParams.language = params.language;
     if (params?.tags) apiParams.tags = params.tags;
+    if (params?.tags && params.tags.length > 0) {
+      apiParams.tags = params.tags.join(','); // Join for backend
+    }
     
     const response = await client.get<Course[]>('/courses', { params: apiParams });
     return response.data;
