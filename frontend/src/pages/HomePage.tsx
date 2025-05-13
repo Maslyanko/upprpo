@@ -1,45 +1,54 @@
 // frontend/src/pages/HomePage.tsx
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import HeroSection from '../components/HeroSection';
 import SearchBar from '../components/SearchBar';
 import CourseList from '../components/CourseList';
-import { useCourses, CourseFilters } from '../hooks/useCourses'; // Import CourseFilters
+import { useCourses, CourseFilters } from '../hooks/useCourses';
 
-// Define initial/default filters
 const initialCourseFilters: CourseFilters = {
   sort: 'popularity',
   tags: [],
   search: '',
-  level: undefined, // Or '' if your API/hook prefers empty strings
-  language: undefined, // Or ''
+  level: undefined,
+  language: undefined,
 };
-
 
 const HomePage: React.FC = () => {
   const { courses, loading, error, filters: currentActiveFilters, applyFilters } = useCourses();
   const catalogRef = useRef<HTMLDivElement>(null);
+  // State for the search bar input, controlled by HomePage
+  const [searchTerm, setSearchTerm] = useState(currentActiveFilters.search || '');
 
   useEffect(() => {
     document.title = 'AI-Hunt - Подготовка к IT собеседованиям';
   }, []);
 
-  const handleSearch = (query: string) => {
-    // When searching, we might want to keep other filters or clear them.
-    // Let's keep sort, but clear tags, level, language if a new text search is initiated.
+  // Sync searchTerm with external changes to currentActiveFilters.search
+  // (e.g., if filters are reset or tag click clears search)
+  useEffect(() => {
+    if (currentActiveFilters.search !== searchTerm) {
+      setSearchTerm(currentActiveFilters.search || '');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentActiveFilters.search]);
+
+
+  const handleSearch = () => {
     applyFilters({
-      sort: currentActiveFilters.sort || 'popularity', // Keep current sort or default
-      search: query,
-      tags: [], // Clear tags on new text search
+      sort: currentActiveFilters.sort || 'popularity',
+      search: searchTerm, // Use the local searchTerm state
+      tags: [],
       level: undefined,
       language: undefined,
     });
   };
 
   const handleTagClick = (tag: string) => {
+    setSearchTerm(''); // Clear search term when a tag is clicked
     applyFilters({
-      sort: currentActiveFilters.sort || 'popularity', // Keep current sort
-      search: '', // Clear search when a tag is clicked
-      tags: [tag], // Set the new tag filter
+      sort: currentActiveFilters.sort || 'popularity',
+      search: '',
+      tags: [tag],
       level: undefined,
       language: undefined,
     });
@@ -47,10 +56,8 @@ const HomePage: React.FC = () => {
   };
 
   const handleResetFilters = () => {
-    // Reset to initial/default filters
+    setSearchTerm(''); // Clear local search term state
     applyFilters(initialCourseFilters);
-    // Optionally, clear the SearchBar's internal state if it has one and doesn't reset automatically
-    // This might require an imperative handle or a key change on SearchBar if its input is not controlled by HomePage
   };
 
   return (
@@ -61,13 +68,13 @@ const HomePage: React.FC = () => {
           <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center sm:text-left">
             Каталог курсов
           </h2>
-          {/* Search bar and Reset Button Container */}
           <div className="flex items-center gap-x-3 mb-8">
-            <div className="flex-grow"> {/* SearchBar takes most space */}
+            <div className="flex-grow">
               <SearchBar
-                onSearch={handleSearch}
+                value={searchTerm}
+                onChange={setSearchTerm} // Controlled component: update searchTerm
+                onSearch={handleSearch} // Trigger search using HomePage's searchTerm
                 placeholder="Поиск по названию, автору или тегам..."
-                initialQuery={currentActiveFilters.search} // Pass current search to prefill
               />
             </div>
             <button
@@ -78,11 +85,14 @@ const HomePage: React.FC = () => {
               Сбросить
             </button>
           </div>
-          <CourseList 
-            courses={courses} 
-            loading={loading} 
-            error={error} 
-          />
+          {/* Wrapper for CourseList to prevent layout jumps */}
+          <div className="min-h-[300px]"> {/* Adjust min-height as needed */}
+            <CourseList
+              courses={courses}
+              loading={loading}
+              error={error}
+            />
+          </div>
         </div>
       </div>
     </div>
