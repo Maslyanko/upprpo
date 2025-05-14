@@ -1,3 +1,4 @@
+// ==== File: frontend/src/components/Navbar.tsx ====
 // ===== ./src/components/Navbar.tsx =====
 import React, { useState, useEffect } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
@@ -64,26 +65,37 @@ const Navbar: React.FC = () => {
     <>
       <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${navClasses}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <NavLink to="/" className="flex-shrink-0 flex items-center">
+          <div className="flex items-center justify-between h-16">
+            {/* Левая часть: Логотип */}
+            <div className="flex-shrink-0 flex items-center">
+              <NavLink to="/" className="flex items-center">
                 <span className={`text-2xl font-bold ${logoColor}`}>AI-Hunt</span>
               </NavLink>
-              <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
-                <NavLink to="/about" className={({ isActive }) => getLinkClasses(isActive)}>
-                  О нас
-                </NavLink>
-                <NavLink to="/" className={({ isActive }) => getLinkClasses(isActive)}>
-                  Курсы
-                </NavLink>
-                {user && (
-                  <NavLink to="/create-course" className={({ isActive }) => getLinkClasses(isActive)}>
-                    Создать курс
-                  </NavLink>
-                )}
-              </div>
             </div>
-            <div className="hidden sm:ml-6 sm:flex sm:items-center">
+
+            {/* Центральная часть: Навигационные ссылки (только для десктопа) */}
+            <div className="hidden sm:flex sm:items-center sm:space-x-8">
+              <NavLink to="/about" className={({ isActive }) => getLinkClasses(isActive)}>
+                О нас
+              </NavLink>
+              <NavLink
+                to="/"
+                className={({ isActive }) => {
+                  const visuallyActive = isHomePage ? false : isActive;
+                  return getLinkClasses(visuallyActive);
+                }}
+              >
+                Курсы
+              </NavLink>
+              {user && (
+                <NavLink to="/create-course" className={({ isActive }) => getLinkClasses(isActive)}>
+                  Создать курс
+                </NavLink>
+              )}
+            </div>
+
+            {/* Правая часть: Профиль/Войти (только для десктопа) */}
+            <div className="hidden sm:flex sm:items-center">
               {user ? (
                 <div className="flex items-center space-x-4">
                   <Link to="/profile" className={authButtonClasses}>
@@ -118,6 +130,9 @@ const Navbar: React.FC = () => {
                 </button>
               )}
             </div>
+
+            {/* Кнопка мобильного меню (только для мобильных) */}
+            {/* Этот блок будет справа на мобильных, т.к. центральный блок скрыт */}
             <div className="flex items-center sm:hidden">
               <button
                 type="button"
@@ -134,13 +149,21 @@ const Navbar: React.FC = () => {
           </div>
         </div>
 
+        {/* Выпадающее мобильное меню */}
         {isMenuOpen && (
           <div className={`sm:hidden ${mobilePanelClasses}`}>
             <div className="pt-2 pb-3 space-y-1">
               <NavLink to="/about" className={({ isActive }) => getMobileLinkClasses(isActive)} onClick={() => setIsMenuOpen(false)}>
                 О нас
               </NavLink>
-              <NavLink to="/" className={({ isActive }) => getMobileLinkClasses(isActive)} onClick={() => setIsMenuOpen(false)}>
+              <NavLink 
+                to="/" 
+                className={({ isActive }) => {
+                    const visuallyActive = isHomePage ? false : isActive;
+                    return getMobileLinkClasses(visuallyActive);
+                }} 
+                onClick={() => setIsMenuOpen(false)}
+               >
                 Курсы
               </NavLink>
               {user && (

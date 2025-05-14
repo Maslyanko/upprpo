@@ -1,3 +1,4 @@
+// ==== File: frontend/src/components/HeroSection.tsx ====
 // ===== ./src/components/HeroSection.tsx =====
 import React from 'react';
 
@@ -19,17 +20,17 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onTagClick }) => {
   };
 
   return (
-    <div className="bg-orange text-white flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] px-4 py-12 sm:py-16"> {/* Adjusted min-h and padding */}
-      <div className="text-center max-w-3xl">
-        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold mb-6">
+    <div className="bg-orange text-white flex flex-col justify-center min-h-[calc(100vh-4rem)] px-4 sm:px-6 md:px-8 lg:px-16 py-12 sm:py-16"> {/* Убрал items-center, добавил отступы для разных экранов */}
+      <div className="max-w-3xl w-full"> {/* Контейнер для контента, выровнен по левому краю родительского блока (с учетом его padding) */}
+        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold mb-6 whitespace-nowrap"> {/* Добавлен whitespace-nowrap */}
           Подготовься к IT-собеседованию
         </h1>
-        <p className="text-lg sm:text-xl text-orange-100 mb-10">
+        <p className="text-lg sm:text-xl text-orange-100 mb-10 text-left"> {/* Добавлен text-left */}
           Получай мгновенную обратную связь на свои ответы и код.
           <br />
           Готовься эффективнее с AI-hunt.
         </p>
-        <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+        <div className="flex flex-wrap justify-start gap-2 sm:gap-3"> {/* Изменен justify-center на justify-start */}
           {tags.map(tag => (
             <button
               key={tag}
