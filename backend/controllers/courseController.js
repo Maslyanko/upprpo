@@ -1,3 +1,4 @@
+// ==== File: backend/controllers/courseController.js ====
 const Course = require('../models/Course');
 
 /**
@@ -149,10 +150,28 @@ const publishCourse = async (req, res) => {
   }
 };
 
+/**
+ * Get all unique tags from published courses
+ * @route GET /courses/tags
+ */
+const getAllTags = async (req, res) => {
+  try {
+    const tags = await Course.findAllUniqueTags();
+    res.status(200).json(tags); // Send as a simple array of strings
+  } catch (error) {
+    console.error('Get all tags error:', error);
+    res.status(500).json({
+      code: 'SERVER_ERROR',
+      message: 'Ошибка при получении тегов'
+    });
+  }
+};
+
 module.exports = {
   getCourses,
   getCourseById,
   createCourse,
   updateCourse,
-  publishCourse
+  publishCourse,
+  getAllTags // <-- ADDED EXPORT
 };

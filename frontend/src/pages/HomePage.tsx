@@ -1,4 +1,3 @@
-// frontend/src/pages/HomePage.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import HeroSection from '../components/HeroSection';
 import SearchBar from '../components/SearchBar';

@@ -1,4 +1,3 @@
-// ===== ./tsconfig.json =====
 {
   "compilerOptions": {
     "target": "ES2020",
@@ -27,19 +26,6 @@
       "@/*": ["./src/*"] // Tell TS that @/* maps to ./src/*
     }
   },
-  "include": ["src", "**/*.ts", "**/*.tsx"], // Ensure it includes src
-  "references": [{ "path": "./tsconfig.node.json" }] // Keep if you have this
+  "include": ["src", "**/*.ts", "**/*.tsx"],
+  "references": [{ "path": "./tsconfig.node.json" }]
 }
-
-// You might also have a tsconfig.node.json, keep it as is, e.g.:
-// ===== ./tsconfig.node.json =====
-// {
-//   "compilerOptions": {
-//     "composite": true,
-//     "skipLibCheck": true,
-//     "module": "ESNext",
-//     "moduleResolution": "bundler", // or "node"
-//     "allowSyntheticDefaultImports": true
-//   },
-//   "include": ["vite.config.ts"]
-// }

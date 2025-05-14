@@ -1,3 +1,4 @@
+// ==== File: frontend/src/api/coursesApi.ts ====
 import client from './client';
 import type { Course } from '../types/Course';
 import type { CourseFilters } from '../hooks/useCourses';
@@ -81,7 +82,6 @@ export async function getCourses(params?: CourseParams): Promise<Course[]> {
     if (params?.sort) apiParams.sort = params.sort;
     if (params?.level) apiParams.difficulty = params.level; // Изменено на difficulty согласно API
     if (params?.language) apiParams.language = params.language;
-    if (params?.tags) apiParams.tags = params.tags;
     if (params?.tags && params.tags.length > 0) {
       apiParams.tags = params.tags.join(','); // Join for backend
     }
@@ -133,5 +133,18 @@ export async function rateCourse(courseId: string, value: number) {
   } else {
     const response = await client.post(`/courses/${courseId}/rating`, { value });
     return response.data;
+  }
+}
+
+// New function to fetch tags
+export async function getAvailableTags(): Promise<string[]> {
+  // For this new feature, we'll directly hit the backend.
+  // Ensure USE_MOCK_DATA at the top of the file is false when testing this.
+  try {
+    const response = await client.get<string[]>('/courses/tags'); // Matches backend route
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching available tags:', error);
+    throw error; // Re-throw to be caught by the component
   }
 }

@@ -1,3 +1,4 @@
+// ==== File: frontend/tailwind.config.js ====
 /** @type {import('tailwindcss').Config} */
 export default {
     content: [
@@ -37,6 +38,21 @@ export default {
             'Arial',
             'sans-serif',
           ],
+        },
+        keyframes: { // <-- ADDED KEYFRAMES
+          marquee: {
+            '0%': { transform: 'translateX(0%)' },
+            '100%': { transform: 'translateX(-100%)' }, // Сдвигаем на всю ширину дублированного контента
+          },
+          'marquee-reverse': { // Для движения в обратную сторону
+            '0%': { transform: 'translateX(-100%)' },
+            '100%': { transform: 'translateX(0%)' },
+          }
+        },
+        animation: { // <-- ADDED ANIMATIONS
+          'marquee-slow': 'marquee 120s linear infinite',
+          'marquee-medium': 'marquee 110s linear infinite',
+          'marquee-fast': 'marquee 90s linear infinite'
         },
       },
     },

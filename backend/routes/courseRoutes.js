@@ -1,3 +1,4 @@
+// ==== File: backend/routes/courseRoutes.js ====
 const express = require('express');
 const router = express.Router();
 const { 
@@ -5,7 +6,8 @@ const {
   getCourseById, 
   createCourse, 
   updateCourse, 
-  publishCourse 
+  publishCourse,
+  getAllTags // <-- IMPORTED
 } = require('../controllers/courseController');
 const { 
   enrollCourse, 
@@ -20,6 +22,13 @@ const { protect, authorOnly } = require('../middleware/auth');
  * @access Public/Private
  */
 router.get('/', getCourses);
+
+/**
+ * @route GET /courses/tags
+ * @desc Get all unique course tags
+ * @access Public
+ */
+router.get('/tags', getAllTags); // <-- ADDED ROUTE
 
 /**
  * @route POST /courses
