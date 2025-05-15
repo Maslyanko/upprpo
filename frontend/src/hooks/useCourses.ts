@@ -1,4 +1,3 @@
-// frontend/src/hooks/useCourses.ts
 import { useState, useEffect, useCallback } from 'react';
 import { getCourses } from '../api/coursesApi';
 import type { Course } from '../types/Course';

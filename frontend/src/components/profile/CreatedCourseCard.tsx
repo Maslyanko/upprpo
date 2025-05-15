@@ -1,4 +1,3 @@
-// ===== ./src/components/profile/CreatedCourseCard.tsx =====
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Course } from '@/types/Course'; // Убедись, что путь верный

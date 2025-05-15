@@ -1,7 +1,5 @@
-// ===== ./frontend/src/components/AuthModal.tsx =====
 import React, { useState } from 'react';
-// import { useNavigate } from 'react-router-dom'; // Можно использовать вместо window.location
-import { useAuth } from '../hooks/useAuth'; // Убедись, что путь верный
+import { useAuth } from '../hooks/useAuth';
 
 // SVG иконки для удобства (можно вынести в отдельные файлы)
 const EyeIcon = () => (
@@ -39,7 +37,6 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSuccess }
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  // const navigate = useNavigate(); // Альтернатива window.location.reload
 
   // Состояние для видимости пароля
   const [showPassword, setShowPassword] = useState(false);

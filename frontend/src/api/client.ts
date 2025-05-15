@@ -1,4 +1,3 @@
-// ===== ./src/api/client.ts =====
 import axios from 'axios';
 
 // Create API client with correct base URL

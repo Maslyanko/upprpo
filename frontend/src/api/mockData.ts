@@ -1,4 +1,3 @@
-// This file provides mock data for development until the actual API is connected
 import { Course } from '../types/Course';
 
 export const mockCourses: Course[] = [

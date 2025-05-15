@@ -1,4 +1,3 @@
-// ===== ./models/Enrollment.js =====
 const db = require('../config/db');
 const Course = require('./Course'); // We might need Course formatting
 

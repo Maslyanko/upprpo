@@ -1,4 +1,3 @@
-// ==== File: backend/controllers/courseController.js ====
 const Course = require('../models/Course');
 
 /**

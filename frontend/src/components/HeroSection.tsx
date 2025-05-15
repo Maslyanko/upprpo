@@ -1,5 +1,3 @@
-// ==== File: frontend/src/components/HeroSection.tsx ====
-// ===== ./src/components/HeroSection.tsx =====
 import React, { useState, useEffect, useMemo } from 'react';
 import { getAvailableTags } from '@/api/coursesApi';
 
@@ -21,10 +19,6 @@ const generateMarqueeRowsData = (
   for (let i = 0; i < numRows; i++) {
     const rowItems: string[] = [];
     let currentSourceIndex = i % sourceTags.length;
-    // Нам нужно достаточно тегов, чтобы заполнить удвоенную ширину (для дублирования в треке)
-    // minItemsPerVisualRow теперь примерно соответствует половине трека.
-    // Умножаем на 2, чтобы точно хватило на дублирование.
-    // И добавим еще небольшой запас, если теги разной длины.
     const itemsNeededForFullTrackLoop = Math.max(minItemsPerVisualRow * 2, sourceTags.length * 2);
 
     for (let j = 0; j < itemsNeededForFullTrackLoop; j++) {
@@ -62,7 +56,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onTagClick }) => {
         }
       } catch (error) {
         console.error("Failed to fetch tags:", error);
-        setTagsError("Не удалось загрузить теги.");
         setTagsFromApi(fallbackTags);
       } finally {
         setIsLoadingTags(false);

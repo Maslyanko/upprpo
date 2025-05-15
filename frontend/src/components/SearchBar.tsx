@@ -1,4 +1,3 @@
-// frontend/src/components/SearchBar.tsx
 import React from 'react';
 
 interface SearchBarProps {

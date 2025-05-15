@@ -1,7 +1,7 @@
 export interface LessonSummary {
   id: string;
   title: string;
-  type: 'Theory' | 'Coding'; // Ensure backend uses these exact strings
+  type: 'Theory' | 'Coding';
   hasQuiz: boolean;
 }
 
@@ -13,28 +13,49 @@ export interface CourseStats {
 
 export interface Course {
   id: string;
-  authorId?: string; // Included in backend model
-  authorName: string; // Included in backend model (joined from users)
-  coverUrl: string | null; // Make nullable if backend allows it
+  authorId?: string;
+  authorName: string;
+  coverUrl: string | null;
   title: string;
-  description?: string; // Included in backend model
-  difficulty: 'Beginner' | 'Middle' | 'Senior'; // Ensure backend uses these exact strings
-  language?: string | null; // Make nullable
-  tags: string[]; // Included in backend model
-  estimatedDuration: number | null; // Make nullable
-  version?: number; // Included in backend model
-  isPublished?: boolean; // Included in backend model
-  stats: CourseStats; // Included in backend model
-  lessons: LessonSummary[]; // Included in backend model
+  description?: string;
+  difficulty: 'Beginner' | 'Middle' | 'Senior';
+  language?: string | null;
+  tags: string[];
+  estimatedDuration: number | null;
+  version?: number;
+  isPublished?: boolean;
+  stats: CourseStats;
+  lessons: LessonSummary[];
 }
-// Модели для создания и обновления курсов
+
 export interface CourseBase {
   title: string;
   description: string;
   difficulty: 'Beginner' | 'Middle' | 'Senior';
-  tags?: string[];
   language?: string;
+  tags?: string[];
+  coverUrl?: string;
+  estimatedDuration?: number;
 }
+
+// Данные для формы создания "фасада" курса
+export interface CourseFacadeData {
+  title: string;
+  description: string;
+  selectedTags: string[];
+  coverFile?: File | null;
+}
+
+// Данные, отправляемые на API для создания курса
+export interface CourseCreatePayload {
+  title: string;
+  description: string;
+  difficulty: 'Beginner' | 'Middle' | 'Senior'; // Обязательное поле для бэкенда
+  language?: string | null; // Сделаем опциональным для API, если пользователь не выбрал
+  tags: string[]; // Остальные теги
+  coverUrl?: string | null;
+}
+
 
 export interface CourseCreateRequest extends CourseBase {
   lessons?: LessonContent[];

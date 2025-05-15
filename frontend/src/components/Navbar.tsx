@@ -1,5 +1,3 @@
-// ==== File: frontend/src/components/Navbar.tsx ====
-// ===== ./src/components/Navbar.tsx =====
 import React, { useState, useEffect } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import AuthModal from './AuthModal';

@@ -1,4 +1,3 @@
-// ===== ./src/components/profile/CompletedCourseCard.tsx =====
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { EnrollmentWithCourse } from '@/api/userApi'; // Убедись, что путь верный

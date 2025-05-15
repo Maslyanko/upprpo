@@ -1,5 +1,3 @@
-// ==== File: backend/models/Course.js ====
-// ===== ./backend/models/Course.js =====
 const db = require('../config/db');
 const { v4: uuidv4 } = require('uuid'); // Keep if used for lessons/questions internally
 
@@ -578,7 +576,6 @@ const findByAuthor = async (authorId) => {
 
     const result = await db.query(query, [authorId]);
 
-    // Get tags and lessons for each course
     const courses = await Promise.all(result.rows.map(async courseRow => {
         const tags = await getCourseTags(courseRow.id);
         const lessons = await getCourseLessons(courseRow.id);
@@ -588,34 +585,14 @@ const findByAuthor = async (authorId) => {
     return courses;
 };
 
-/**
- * Получение всех уникальных тегов из опубликованных курсов
- * @returns {Promise<Array<string>>} - Массив уникальных тегов
- */
-const findAllUniqueTags = async () => {
-    const query = `
-        SELECT DISTINCT ct.tag
-        FROM course_tags ct
-        JOIN courses c ON ct.course_id = c.id
-        WHERE c.is_published = true
-        ORDER BY ct.tag;
-    `;
-    const result = await db.query(query);
-    return result.rows.map(row => row.tag);
-};
-
-
-// --- IMPORTANT: Define ALL functions before exporting ---
 
 module.exports = {
     findAll,
-    findById, // Ensure this is defined ABOVE this line
+    findById,
     create,
     update,
     publish,
     findByAuthor,
-    findAllUniqueTags, // <-- ADDED EXPORT
-    // Export helpers ONLY if they are needed by other models (like Enrollment.js)
     getCourseTags,
     getCourseLessons,
     formatCourseData

@@ -1,4 +1,3 @@
-// ==== File: backend/routes/courseRoutes.js ====
 const express = require('express');
 const router = express.Router();
 const { 
