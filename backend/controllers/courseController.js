@@ -160,11 +160,35 @@ const getAllTags = async (req, res) => {
   }
 };
 
+/**
+ * Delete a course
+ * @route DELETE /courses/:courseId
+ * @access Private (Author only)
+ */
+const deleteCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const authorId = req.user.id;
+
+    // The Course.delete method should handle author check and actual deletion
+    await Course.deleteById(courseId, authorId); 
+    
+    res.status(204).send(); // No content, successful deletion
+  } catch (error) {
+    console.error('Delete course error:', error);
+    if (error.message === 'Course not found or not authorized') {
+      return res.status(403).json({ code: 'FORBIDDEN', message: 'Вы не являетесь автором этого курса или курс не найден для удаления' });
+    }
+    res.status(500).json({ code: 'SERVER_ERROR', message: 'Ошибка при удалении курса' });
+  }
+};
+
 module.exports = {
   getCourses,
   getCourseById,
   createCourse,
   updateCourse,
   publishCourse,
-  getAllTags
+  getAllTags,
+  deleteCourse
 };

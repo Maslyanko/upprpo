@@ -1,4 +1,5 @@
 // ==== File: backend/models/Course.js ====
+// ==== File: backend/models/Course.js ====
 const db = require('../config/db');
 const Tag = require('./Tag'); // For tag handling
 
@@ -18,13 +19,11 @@ const getCourseTagNames = async (courseId, client = db) => {
 
 /**
  * Helper to get lesson summaries for a course.
- * (This will be more complex with pages, for now a simplified version)
  * @param {string} courseId
  * @param {Object} client - Optional DB client for transactions
  * @returns {Promise<Array<Object>>}
  */
 const getCourseLessonSummaries = async (courseId, client = db) => {
-  // This needs to fetch lessons, then for each lesson, determine if it has quiz pages.
   const lessonsResult = await client.query(
     `SELECT l.id, l.title, l.sort_order, l.description
      FROM lessons l
@@ -35,7 +34,6 @@ const getCourseLessonSummaries = async (courseId, client = db) => {
 
   const lessons = [];
   for (const lessonRow of lessonsResult.rows) {
-    // A lesson "hasQuiz" if any of its pages are of type 'ASSIGNMENT' and have questions
     const quizPageCheck = await client.query(
       `SELECT EXISTS (
          SELECT 1
@@ -49,9 +47,7 @@ const getCourseLessonSummaries = async (courseId, client = db) => {
       id: lessonRow.id,
       title: lessonRow.title,
       description: lessonRow.description,
-      sortOrder: lessonRow.sort_order,
-      // 'type' is removed from lesson, this needs rethinking. For now, 'hasQuiz' might suffice.
-      // A lesson's "type" could be inferred (e.g., if it only has methodical pages vs. assignment pages)
+      sort_order: lessonRow.sort_order,
       hasQuiz: quizPageCheck.rows[0].has_quiz,
     });
   }
@@ -62,20 +58,18 @@ const getCourseLessonSummaries = async (courseId, client = db) => {
  * Format course data for API response.
  * @param {Object} courseRow - Raw course data from DB.
  * @param {Array<string>} tags - Array of tag names.
- * @param {Array<Object>} lessons - Array of lesson summaries.
+ * @param {Array<Object>} lessons - Array of lesson summaries or detailed lessons.
  * @returns {Object} Formatted course data.
  */
 const formatCourseData = (courseRow, tags, lessons) => {
-  // Extract difficulty and language from tags if they exist
   const difficultyTag = tags.find(tag => ['Beginner', 'Middle', 'Senior'].includes(tag)) || null;
-  // You might have a predefined list of language tags to check against
-  // For simplicity, I'm not extracting language separately here, it's just another tag.
-  // If you need 'language' as a separate field in the response, you'd add logic here.
+  const KNOWN_LANGUAGES_FOR_FORMAT = ['Python', 'JavaScript', 'Java', 'SQL', 'Go', 'C++', 'C#', 'Ruby', 'PHP', 'Swift', 'Kotlin', 'Rust', 'TypeScript', 'English', 'Русский'];
+  const languageTag = tags.find(tag => KNOWN_LANGUAGES_FOR_FORMAT.includes(tag)) || null;
 
   return {
     id: courseRow.id,
     authorId: courseRow.author_id,
-    authorName: courseRow.author_name, // From JOIN
+    authorName: courseRow.author_name,
     title: courseRow.title,
     description: courseRow.description,
     coverUrl: courseRow.cover_url,
@@ -83,21 +77,21 @@ const formatCourseData = (courseRow, tags, lessons) => {
     version: courseRow.version,
     isPublished: courseRow.is_published,
     tags: tags || [],
-    difficulty: difficultyTag, // This is now one of the tags
-    // language: languageTag, // Example if you extract it
+    difficulty: difficultyTag,
+    language: languageTag,
     stats: {
       enrollments: parseInt(courseRow.enrollments, 10) || 0,
       avgCompletion: parseFloat(courseRow.avg_completion) || 0,
-      avgRating: parseFloat(courseRow.avg_rating) || 0, // Was avg_score
+      avgRating: parseFloat(courseRow.avg_rating) || 0,
     },
-    lessons: lessons || [], // Lesson summaries
+    lessons: lessons || [],
     createdAt: courseRow.created_at,
     updatedAt: courseRow.updated_at,
   };
 };
 
 const findAll = async (filters = {}) => {
-  const { search, tags: filterTags = [], difficulty, language } = filters; // `sort` can be added later
+  const { search, tags: filterTags = [], difficulty, language } = filters;
 
   let query = `
     SELECT
@@ -121,14 +115,11 @@ const findAll = async (filters = {}) => {
     paramIndex++;
   }
 
-  // Combine difficulty, language, and other tags for filtering
   const allFilterTagNames = [...filterTags];
   if (difficulty) allFilterTagNames.push(difficulty);
   if (language) allFilterTagNames.push(language);
 
   if (allFilterTagNames.length > 0) {
-    // This subquery ensures the course has ALL specified tags.
-    // If you want ANY, you'd use `t.name = ANY($${paramIndex})` and adjust the count.
     const tagPlaceholders = allFilterTagNames.map((_, i) => `$${paramIndex + i}`).join(',');
     whereConditions.push(`
       c.id IN (
@@ -147,7 +138,7 @@ const findAll = async (filters = {}) => {
   if (whereConditions.length > 0) {
     query += ` WHERE ${whereConditions.join(' AND ')}`;
   }
-  query += ` ORDER BY c.created_at DESC`; // Default sort
+  query += ` ORDER BY c.created_at DESC`;
 
   const result = await db.query(query, queryParams);
 
@@ -158,7 +149,7 @@ const findAll = async (filters = {}) => {
   }));
 };
 
-const findById = async (id, version = null) => {
+const findById = async (id, version = null, client = db) => {
   let queryText = `
     SELECT
       c.id, c.author_id, u.full_name AS author_name, c.title, c.description,
@@ -179,22 +170,20 @@ const findById = async (id, version = null) => {
   }
   queryText += ` ORDER BY c.version DESC LIMIT 1`;
 
-
-  const result = await db.query(queryText, queryParams);
+  const result = await client.query(queryText, queryParams);
   if (result.rows.length === 0) return null;
 
   const courseRow = result.rows[0];
-  const courseTags = await getCourseTagNames(courseRow.id);
+  const courseTags = await getCourseTagNames(courseRow.id, client);
 
-  // Fetch detailed lessons and pages for a single course view
-  const lessonsResult = await db.query(
+  const lessonsResult = await client.query(
     `SELECT id, title, description, sort_order FROM lessons WHERE course_id = $1 ORDER BY sort_order`,
     [courseRow.id]
   );
 
   const detailedLessons = [];
   for (const lesson of lessonsResult.rows) {
-    const pagesResult = await db.query(
+    const pagesResult = await client.query(
       `SELECT id, title, page_type, sort_order FROM lesson_pages WHERE lesson_id = $1 ORDER BY sort_order`,
       [lesson.id]
     );
@@ -202,17 +191,17 @@ const findById = async (id, version = null) => {
     for (const page of pagesResult.rows) {
       let pageDetails = { ...page, content: null, questions: [] };
       if (page.page_type === 'METHODICAL') {
-        const contentResult = await db.query('SELECT content FROM methodical_page_content WHERE page_id = $1', [page.id]);
+        const contentResult = await client.query('SELECT content FROM methodical_page_content WHERE page_id = $1', [page.id]);
         if (contentResult.rows.length > 0) {
           pageDetails.content = contentResult.rows[0].content;
         }
       } else if (page.page_type === 'ASSIGNMENT') {
-        const questionsResult = await db.query(
-          'SELECT id, text, type, sort_order FROM questions WHERE page_id = $1 ORDER BY sort_order',
+        const questionsResult = await client.query( // Fetch correct_answer
+          'SELECT id, text, type, correct_answer, sort_order FROM questions WHERE page_id = $1 ORDER BY sort_order',
           [page.id]
         );
         for (const question of questionsResult.rows) {
-          const optionsResult = await db.query(
+          const optionsResult = await client.query(
             'SELECT id, label, is_correct, sort_order FROM question_options WHERE question_id = $1 ORDER BY sort_order',
             [question.id]
           );
@@ -223,23 +212,82 @@ const findById = async (id, version = null) => {
     }
     detailedLessons.push({ ...lesson, pages });
   }
-
-  return formatCourseData(courseRow, courseTags, detailedLessons); // Pass detailedLessons here
+  return formatCourseData(courseRow, courseTags, detailedLessons);
 };
+
+async function _updateOrInsertLessons(client, courseId, lessonsData) {
+  await client.query('DELETE FROM lessons WHERE course_id = $1', [courseId]);
+
+  if (lessonsData && Array.isArray(lessonsData)) {
+    for (let lessonIdx = 0; lessonIdx < lessonsData.length; lessonIdx++) {
+      const lessonInput = lessonsData[lessonIdx];
+      const lessonResult = await client.query(
+        `INSERT INTO lessons (course_id, title, description, sort_order)
+         VALUES ($1, $2, $3, $4) RETURNING id`,
+        [courseId, lessonInput.title, lessonInput.description || null, lessonIdx]
+      );
+      const lessonId = lessonResult.rows[0].id;
+
+      if (Array.isArray(lessonInput.pages)) {
+        for (let pageIdx = 0; pageIdx < lessonInput.pages.length; pageIdx++) {
+          const pageInput = lessonInput.pages[pageIdx];
+          const pageResult = await client.query(
+            `INSERT INTO lesson_pages (lesson_id, title, page_type, sort_order)
+             VALUES ($1, $2, $3, $4) RETURNING id`,
+            [lessonId, pageInput.title, pageInput.page_type, pageIdx]
+          );
+          const pageId = pageResult.rows[0].id;
+
+          if (pageInput.page_type === 'METHODICAL' && pageInput.content) {
+            await client.query(
+              'INSERT INTO methodical_page_content (page_id, content) VALUES ($1, $2)',
+              [pageId, pageInput.content]
+            );
+          } else if (pageInput.page_type === 'ASSIGNMENT' && Array.isArray(pageInput.questions)) {
+            for (let questionIdx = 0; questionIdx < pageInput.questions.length; questionIdx++) {
+              const qInput = pageInput.questions[questionIdx];
+              console.log(`[COURSE MODEL DEBUG] Inserting Question for page ${pageId}:`);
+              console.log(`  Text: ${qInput.text}`);
+              console.log(`  Type: ${qInput.type}`);
+              console.log(`  Correct Answer (from qInput): '${qInput.correct_answer}' (Type: ${typeof qInput.correct_answer})`);
+              console.log(`  Sort Order: ${questionIdx}`);
+              const questionResult = await client.query( // Insert correct_answer
+                `INSERT INTO questions (page_id, text, type, correct_answer, sort_order)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+                [pageId, qInput.text, qInput.type, qInput.correct_answer || null, questionIdx]
+              );
+              const questionId = questionResult.rows[0].id;
+
+              if (Array.isArray(qInput.options)) {
+                for (let optionIdx = 0; optionIdx < qInput.options.length; optionIdx++) {
+                  const optInput = qInput.options[optionIdx];
+                  await client.query(
+                    `INSERT INTO question_options (question_id, label, is_correct, sort_order)
+                     VALUES ($1, $2, $3, $4)`,
+                    [questionId, optInput.label, optInput.is_correct || false, optionIdx]
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
 
 const create = async (courseData, authorId) => {
   const {
-    title, description, tags = [], // Expect array of tag names, e.g., ["Python", "Beginner"]
+    title, description, tags = [],
     coverUrl = '/images/courses/default.png',
-    estimatedDuration = 0, // Can be calculated later
-    lessonsData = [], // Expects an array of lesson objects, each with pages, etc.
+    estimatedDuration = 0,
+    lessonsData = [],
   } = courseData;
 
   const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 1. Create Course
     const courseResult = await client.query(
       `INSERT INTO courses (author_id, title, description, cover_url, estimated_duration, version, is_published)
        VALUES ($1, $2, $3, $4, $5, 1, false) RETURNING *`,
@@ -248,68 +296,19 @@ const create = async (courseData, authorId) => {
     const course = courseResult.rows[0];
     const courseId = course.id;
 
-    // 2. Create Course Stats
     await client.query('INSERT INTO course_stats (course_id) VALUES ($1)', [courseId]);
 
-    // 3. Handle Tags
     if (tags.length > 0) {
       for (const tagName of tags) {
         const tag = await Tag.findOrCreate(tagName, client);
-        await client.query('INSERT INTO course_tags (course_id, tag_id) VALUES ($1, $2)', [courseId, tag.id]);
+        await client.query('INSERT INTO course_tags (course_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [courseId, tag.id]);
       }
     }
-
-    // 4. Handle Lessons and their Pages
-    let lessonSortOrder = 0;
-    for (const lessonInput of lessonsData) {
-      const lessonResult = await client.query(
-        `INSERT INTO lessons (course_id, title, description, sort_order)
-         VALUES ($1, $2, $3, $4) RETURNING id`,
-        [courseId, lessonInput.title, lessonInput.description || null, lessonSortOrder++]
-      );
-      const lessonId = lessonResult.rows[0].id;
-
-      let pageSortOrder = 0;
-      for (const pageInput of lessonInput.pages || []) {
-        const pageResult = await client.query(
-          `INSERT INTO lesson_pages (lesson_id, title, page_type, sort_order)
-           VALUES ($1, $2, $3, $4) RETURNING id`,
-          [lessonId, pageInput.title, pageInput.pageType, pageSortOrder++]
-        );
-        const pageId = pageResult.rows[0].id;
-
-        if (pageInput.pageType === 'METHODICAL' && pageInput.content) {
-          await client.query(
-            'INSERT INTO methodical_page_content (page_id, content) VALUES ($1, $2)',
-            [pageId, pageInput.content]
-          );
-        } else if (pageInput.pageType === 'ASSIGNMENT' && pageInput.questions) {
-          let questionSortOrder = 0;
-          for (const qInput of pageInput.questions) {
-            const questionResult = await client.query(
-              `INSERT INTO questions (page_id, text, type, sort_order)
-               VALUES ($1, $2, $3, $4) RETURNING id`,
-              [pageId, qInput.text, qInput.type, questionSortOrder++]
-            );
-            const questionId = questionResult.rows[0].id;
-
-            if (qInput.options) {
-              let optionSortOrder = 0;
-              for (const optInput of qInput.options) {
-                await client.query(
-                  `INSERT INTO question_options (question_id, label, is_correct, sort_order)
-                   VALUES ($1, $2, $3, $4)`,
-                  [questionId, optInput.label, optInput.isCorrect || false, optionSortOrder++]
-                );
-              }
-            }
-          }
-        }
-      }
-    }
+    
+    await _updateOrInsertLessons(client, courseId, lessonsData);
 
     await client.query('COMMIT');
-    return findById(courseId); // Return full course details
+    return findById(courseId, null, client);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("Error creating course:", error);
@@ -330,14 +329,12 @@ const publish = async (courseId, authorId) => {
     if (courseCheck.rows.length === 0) {
       throw new Error('Course not found or not authorized');
     }
-    // Consider version increment logic here if not creating a new row
-    // For this example, just setting is_published = true and incrementing version on the same row
     await client.query(
       'UPDATE courses SET is_published = true, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
       [courseId]
     );
     await client.query('COMMIT');
-    return findById(courseId);
+    return findById(courseId, null, client);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("Error publishing course:", error);
@@ -365,7 +362,7 @@ const findByAuthor = async (authorId) => {
   const result = await db.query(query, [authorId]);
   return Promise.all(result.rows.map(async (row) => {
     const courseTags = await getCourseTagNames(row.id);
-    const lessonSummaries = await getCourseLessonSummaries(row.id); // Simplified for list view
+    const lessonSummaries = await getCourseLessonSummaries(row.id);
     return formatCourseData(row, courseTags, lessonSummaries);
   }));
 };
@@ -375,29 +372,41 @@ const update = async (courseId, updateData, authorId) => {
   try {
     await client.query('BEGIN');
 
-    const courseCheck = await client.query(
-      'SELECT is_published FROM courses WHERE id = $1 AND author_id = $2',
-      [courseId, authorId]
+    const courseCheckResult = await client.query(
+      'SELECT is_published, author_id FROM courses WHERE id = $1',
+      [courseId]
     );
-    if (courseCheck.rows.length === 0) throw new Error('Course not found or not authorized');
-    if (courseCheck.rows[0].is_published) throw new Error('Cannot update published course. Create a new version.');
+    if (courseCheckResult.rows.length === 0) throw new Error('Course not found');
+    
+    const courseInfo = courseCheckResult.rows[0];
+    if (courseInfo.author_id !== authorId) throw new Error('Not authorized to update this course');
+    
+    // Simplified check: if lessons are part of the payload, assume it's a content update.
+    const isContentUpdate = updateData.lessons !== undefined;
 
-    const { title, description, coverUrl, estimatedDuration, tags, lessons: lessonsData } = updateData; // переименовал lessonsData в lessons для консистентности с payload
+    if (courseInfo.is_published && !isContentUpdate) { 
+         throw new Error('Cannot update published course facade. Create a new version or unpublish first.');
+    }
+
+    const { title, description, coverUrl, estimatedDuration, tags, lessons } = updateData;
 
     const courseUpdateFields = [];
     const courseUpdateValues = [];
     let courseParamIdx = 1;
 
     const addField = (field, value) => {
-      if (value !== undefined) { // Позволяем передавать null для сброса некоторых полей
+      if (value !== undefined) {
         courseUpdateFields.push(`${field} = $${courseParamIdx++}`);
         courseUpdateValues.push(value);
       }
     };
-    addField('title', title);
-    addField('description', description);
-    addField('cover_url', coverUrl);
-    addField('estimated_duration', estimatedDuration);
+
+    if (!isContentUpdate) { // Only update these if it's primarily a facade update
+        addField('title', title);
+        addField('description', description);
+        addField('cover_url', coverUrl);
+        addField('estimated_duration', estimatedDuration);
+    }
 
     if (courseUpdateFields.length > 0) {
       courseUpdateValues.push(courseId);
@@ -407,7 +416,7 @@ const update = async (courseId, updateData, authorId) => {
       );
     }
 
-    if (tags !== undefined) {
+    if (tags !== undefined && !isContentUpdate) { 
       await client.query('DELETE FROM course_tags WHERE course_id = $1', [courseId]);
       if (Array.isArray(tags) && tags.length > 0) {
         for (const tagName of tags) {
@@ -416,74 +425,48 @@ const update = async (courseId, updateData, authorId) => {
         }
       }
     }
-
-    // --- ОБНОВЛЕНИЕ УРОКОВ (подход delete-recreate) ---
-    if (lessonsData !== undefined && Array.isArray(lessonsData)) {
-      // 1. Удаляем все существующие уроки (и связанные с ними страницы, контент, вопросы через ON DELETE CASCADE)
-      await client.query('DELETE FROM lessons WHERE course_id = $1', [courseId]);
-
-      // 2. Создаем уроки заново на основе присланного массива lessonsData
-      // sort_order будет определяться порядком в массиве lessonsData
-      for (let i = 0; i < lessonsData.length; i++) {
-        const lessonInput = lessonsData[i];
-        const lessonResult = await client.query(
-          `INSERT INTO lessons (course_id, title, description, sort_order)
-           VALUES ($1, $2, $3, $4) RETURNING id`,
-          // Бэкенд должен использовать sort_order, который пришел от фронтенда (индекс массива)
-          [courseId, lessonInput.title, lessonInput.description || null, i]
-        );
-        const lessonId = lessonResult.rows[0].id;
-
-        // Если бы мы редактировали страницы и вопросы, здесь была бы логика их создания:
-        if (Array.isArray(lessonInput.pages)) {
-          for (let j = 0; j < lessonInput.pages.length; j++) {
-            const pageInput = lessonInput.pages[j];
-            const pageResult = await client.query(
-              `INSERT INTO lesson_pages (lesson_id, title, page_type, sort_order)
-               VALUES ($1, $2, $3, $4) RETURNING id`,
-              [lessonId, pageInput.title, pageInput.page_type, j] // page_type было pageType
-            );
-            const pageId = pageResult.rows[0].id;
-
-            if (pageInput.page_type === 'METHODICAL' && pageInput.content) {
-              await client.query(
-                'INSERT INTO methodical_page_content (page_id, content) VALUES ($1, $2)',
-                [pageId, pageInput.content]
-              );
-            } else if (pageInput.page_type === 'ASSIGNMENT' && Array.isArray(pageInput.questions)) {
-              for (let k = 0; k < pageInput.questions.length; k++) {
-                const qInput = pageInput.questions[k];
-                const questionResult = await client.query(
-                  `INSERT INTO questions (page_id, text, type, sort_order)
-                   VALUES ($1, $2, $3, $4) RETURNING id`,
-                  [pageId, qInput.text, qInput.type, k]
-                );
-                const questionId = questionResult.rows[0].id;
-
-                if (Array.isArray(qInput.options)) {
-                  for (let l = 0; l < qInput.options.length; l++) {
-                    const optInput = qInput.options[l];
-                    await client.query(
-                      `INSERT INTO question_options (question_id, label, is_correct, sort_order)
-                       VALUES ($1, $2, $3, $4)`,
-                      [questionId, optInput.label, optInput.is_correct || false, l]
-                    );
-                  }
-                }
-              }
-            }
-          }
-        }
+    
+    if (lessons !== undefined && Array.isArray(lessons)) { // Check for lessons specifically
+      await _updateOrInsertLessons(client, courseId, lessons);
+      if (courseInfo.is_published) { // If content of a published course changes, bump version
+        await client.query('UPDATE courses SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [courseId]);
       }
     }
-    // --- КОНЕЦ ОБНОВЛЕНИЯ УРОКОВ ---
 
     await client.query('COMMIT');
-    return findById(courseId); // Важно вернуть обновленный курс с новыми ID уроков
+    return findById(courseId, null, client);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("Error updating course:", error);
     throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const deleteById = async (courseId, authorId) => {
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Verify author and course existence
+    const courseCheck = await client.query(
+      'SELECT id FROM courses WHERE id = $1 AND author_id = $2',
+      [courseId, authorId]
+    );
+    if (courseCheck.rows.length === 0) {
+      throw new Error('Course not found or not authorized');
+    }
+
+    // Deletion will cascade due to ON DELETE CASCADE in DB schema
+    // (course_tags, course_stats, lessons -> lesson_pages -> etc., enrollments, ratings)
+    await client.query('DELETE FROM courses WHERE id = $1', [courseId]);
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("Error deleting course:", error);
+    throw error; // Re-throw to be caught by controller
   } finally {
     client.release();
   }
@@ -496,7 +479,8 @@ module.exports = {
   update,
   publish,
   findByAuthor,
-  getCourseTagNames, // Exported for potential use elsewhere (e.g. Enrollment model)
-  getCourseLessonSummaries, // Exported for potential use elsewhere
-  formatCourseData, // Exported for potential use elsewhere
+  getCourseTagNames,
+  getCourseLessonSummaries,
+  formatCourseData,
+  deleteById
 };

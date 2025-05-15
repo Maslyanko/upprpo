@@ -6,7 +6,8 @@ const {
   createCourse, 
   updateCourse, 
   publishCourse,
-  getAllTags // <-- IMPORTED
+  getAllTags,
+  deleteCourse
 } = require('../controllers/courseController');
 const { 
   enrollCourse, 
@@ -77,5 +78,12 @@ router.get('/:courseId/progress', protect, getProgress);
  * @access Private
  */
 router.post('/:courseId/rating', protect, rateCourse);
+
+/**
+ * @route DELETE /courses/:courseId
+ * @desc Delete a course
+ * @access Private (Author only)
+ */
+router.delete('/:courseId', protect, deleteCourse);
 
 module.exports = router;

@@ -1,4 +1,6 @@
 // ==== File: frontend/src/types/Course.ts ====
+// ==== File: frontend/src/types/Course.ts ====
+import { v4 as uuidv4 } from 'uuid';
 
 export interface MethodicalPageContent {
   content: string;
@@ -14,10 +16,11 @@ export interface QuestionOption {
 export interface Question {
   id: string;
   page_id?: string;
-  text: string;
+  text: string; // Markdown
   type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TEXT_INPUT' | 'CODE_INPUT';
+  correct_answer?: string | null; // NEW: For TEXT_INPUT and CODE_INPUT
   sort_order: number;
-  options?: QuestionOption[];
+  options: QuestionOption[];
 }
 
 export interface LessonPage {
@@ -26,13 +29,13 @@ export interface LessonPage {
   title: string;
   page_type: 'METHODICAL' | 'ASSIGNMENT';
   sort_order: number;
-  content?: string;
-  questions?: Question[];
+  content: string;
+  questions: Question[];
 }
 
 export interface LessonEditable extends LessonIdentifiable {
     description?: string | null;
-    pages?: LessonPage[];
+    pages: LessonPage[];
 }
 
 export interface LessonIdentifiable {
@@ -45,7 +48,7 @@ export interface LessonSummary {
   id: string;
   title: string;
   description?: string | null;
-  sortOrder: number;
+  sort_order: number;
   hasQuiz: boolean;
 }
 
@@ -69,7 +72,7 @@ export interface Course {
   difficulty: 'Beginner' | 'Middle' | 'Senior' | null;
   language: string | null;
   stats: CourseStats;
-  lessons: LessonSummary[] | LessonEditable[] | Lesson[];
+  lessons: LessonSummary[] | LessonEditable[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -82,31 +85,42 @@ export interface CourseFacadePayload {
   estimatedDuration?: number;
 }
 
+export interface QuestionOptionPayload {
+  id?: string;
+  label: string;
+  is_correct: boolean;
+  sort_order: number;
+}
+export interface QuestionPayload {
+  id?: string;
+  text: string;
+  type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TEXT_INPUT' | 'CODE_INPUT';
+  correct_answer?: string | null; // NEW
+  sort_order: number;
+  options: QuestionOptionPayload[];
+}
+export interface LessonPagePayload {
+  id?: string;
+  title: string;
+  page_type: 'METHODICAL' | 'ASSIGNMENT';
+  sort_order: number;
+  content: string;
+  questions: QuestionPayload[];
+}
 export interface LessonPayloadForBackend {
     id?: string;
     title: string;
     description?: string | null;
-    sort_order: number; // Бэкенд может использовать индекс массива
-    pages?: Array<{
-        id?: string;
-        title: string;
-        page_type: 'METHODICAL' | 'ASSIGNMENT';
-        sort_order: number;
-        content?: string;
-        questions?: Array<{
-            id?: string;
-            text: string;
-            type: string;
-            sort_order: number;
-            options?: Array<{ id?: string; label: string; is_correct?: boolean; sort_order: number }>;
-        }>;
-    }>;
+    sort_order: number;
+    pages: LessonPagePayload[];
 }
 export interface CourseContentUpdatePayload {
-  lessons?: LessonPayloadForBackend[];
-  // Могут быть и другие поля для обновления всего курса, если бэк это поддерживает одним запросом
-  // title?: string;
-  // description?: string;
+  lessons: LessonPayloadForBackend[];
+  title?: string;
+  description?: string;
+  tags?: string[];
+  coverUrl?: string | null;
+  estimatedDuration?: number;
 }
 
 export const getDifficultyFromTags = (tags: string[]): 'Beginner' | 'Middle' | 'Senior' | null => {
@@ -126,4 +140,35 @@ export const getLanguageFromTags = (tags: string[]): string | null => {
     }
   }
   return null;
+};
+
+export const createNewLessonPage = (type: 'METHODICAL' | 'ASSIGNMENT', sortOrder: number): LessonPage => {
+    return {
+        id: `temp-${uuidv4()}`,
+        title: type === 'METHODICAL' ? 'Новая страница' : 'Новое задание',
+        page_type: type,
+        sort_order: sortOrder,
+        content: '',
+        questions: [],
+    };
+};
+
+export const createNewQuestion = (sortOrder: number): Question => {
+    return {
+        id: `temp-${uuidv4()}`,
+        text: 'Новый вопрос...',
+        type: 'TEXT_INPUT',
+        correct_answer: '', // Default empty correct answer
+        sort_order: sortOrder,
+        options: [],
+    };
+};
+
+export const createNewQuestionOption = (sortOrder: number): QuestionOption => {
+    return {
+        id: `temp-${uuidv4()}`,
+        label: 'Новый вариант',
+        is_correct: false,
+        sort_order: sortOrder,
+    };
 };
