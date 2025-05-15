@@ -1,11 +1,9 @@
 // ==== File: frontend/src/types/Course.ts ====
 
-// For METHODICAL pages
 export interface MethodicalPageContent {
-  content: string; // Markdown content
+  content: string;
 }
 
-// For ASSIGNMENT pages
 export interface QuestionOption {
   id: string;
   label: string;
@@ -15,48 +13,51 @@ export interface QuestionOption {
 
 export interface Question {
   id: string;
-  text: string; // Description of the task/question
-  type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TEXT_INPUT' | 'CODE_INPUT'; // Add more as needed
+  page_id?: string;
+  text: string;
+  type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TEXT_INPUT' | 'CODE_INPUT';
   sort_order: number;
   options?: QuestionOption[];
 }
 
 export interface LessonPage {
   id: string;
+  lesson_id?: string;
   title: string;
   page_type: 'METHODICAL' | 'ASSIGNMENT';
   sort_order: number;
-  // Content is specific to page type
-  content?: string; // For METHODICAL pages (Markdown)
-  questions?: Question[]; // For ASSIGNMENT pages
+  content?: string;
+  questions?: Question[];
 }
 
-export interface Lesson { // Detailed lesson structure
+export interface LessonEditable extends LessonIdentifiable {
+    description?: string | null;
+    pages?: LessonPage[];
+}
+
+export interface LessonIdentifiable {
   id: string;
   title: string;
-  description?: string | null;
   sort_order: number;
-  pages: LessonPage[];
-  // hasQuiz might be determined by checking if pages include ASSIGNMENT type with questions
 }
 
-export interface LessonSummary { // For course list / overview
+export interface LessonSummary {
   id: string;
   title: string;
   description?: string | null;
-  sortOrder: number; // Renamed from sort_order for consistency
-  hasQuiz: boolean; // Indicates if the lesson contains any quiz/assignment pages
+  sortOrder: number;
+  hasQuiz: boolean;
 }
 
 export interface CourseStats {
   enrollments: number;
   avgCompletion: number;
-  avgRating: number; // Changed from avgScore
+  avgRating: number;
 }
 
 export interface Course {
   id: string;
-  authorId?: string; // Still optional as it might not always be needed by frontend
+  authorId?: string;
   authorName: string;
   title: string;
   description?: string;
@@ -64,54 +65,61 @@ export interface Course {
   estimatedDuration: number | null;
   version?: number;
   isPublished?: boolean;
-  tags: string[]; // Array of tag names, e.g., ["Python", "Beginner", "Backend"]
-  difficulty: 'Beginner' | 'Middle' | 'Senior' | null; // Derived from tags
-  language: string | null; // Derived from tags, if specific language tags are used
+  tags: string[];
+  difficulty: 'Beginner' | 'Middle' | 'Senior' | null;
+  language: string | null;
   stats: CourseStats;
-  lessons: Lesson[] | LessonSummary[]; // Detailed for single course, summary for list
-  createdAt?: string; // Optional, might not always be present or needed
-  updatedAt?: string; // Optional
+  lessons: LessonSummary[] | LessonEditable[] | Lesson[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-// Data for the initial "facade" creation form
 export interface CourseFacadePayload {
   title: string;
   description: string;
-  tags: string[]; // All selected tag names, backend will sort out difficulty/language
+  tags: string[];
   coverUrl?: string | null;
-  estimatedDuration?: number; // Optional at facade creation
+  estimatedDuration?: number;
 }
 
-// Full payload for backend Course.create, potentially including lessons
-export interface CourseCreatePayload extends CourseFacadePayload {
-    lessonsData?: Array<{ // This structure mirrors backend Course.create expectation
+export interface LessonPayloadForBackend {
+    id?: string;
+    title: string;
+    description?: string | null;
+    sort_order: number; // Бэкенд может использовать индекс массива
+    pages?: Array<{
+        id?: string;
         title: string;
-        description?: string | null;
-        pages: Array<{
-            title: string;
-            pageType: 'METHODICAL' | 'ASSIGNMENT';
-            content?: string; // For METHODICAL
-            questions?: Array<{ // For ASSIGNMENT
-                text: string;
-                type: string;
-                options?: Array<{ label: string; isCorrect?: boolean }>;
-            }>;
+        page_type: 'METHODICAL' | 'ASSIGNMENT';
+        sort_order: number;
+        content?: string;
+        questions?: Array<{
+            id?: string;
+            text: string;
+            type: string;
+            sort_order: number;
+            options?: Array<{ id?: string; label: string; is_correct?: boolean; sort_order: number }>;
         }>;
     }>;
 }
+export interface CourseContentUpdatePayload {
+  lessons?: LessonPayloadForBackend[];
+  // Могут быть и другие поля для обновления всего курса, если бэк это поддерживает одним запросом
+  // title?: string;
+  // description?: string;
+}
 
-// Helper function to extract difficulty from tags
 export const getDifficultyFromTags = (tags: string[]): 'Beginner' | 'Middle' | 'Senior' | null => {
+  if (!tags) return null;
   if (tags.includes('Beginner')) return 'Beginner';
   if (tags.includes('Middle')) return 'Middle';
   if (tags.includes('Senior')) return 'Senior';
   return null;
 };
 
-// Helper function to extract language from tags (example, customize as needed)
-// This assumes language tags are unique and identifiable (e.g., not "JavaScript Basics" but just "JavaScript")
-const KNOWN_LANGUAGES = ['Python', 'JavaScript', 'Java', 'SQL', 'Go', 'C++', 'C#', 'Ruby', 'PHP', 'Swift', 'Kotlin', 'Rust', 'TypeScript', 'English', 'Русский']; // Extend this list
+const KNOWN_LANGUAGES = ['Python', 'JavaScript', 'Java', 'SQL', 'Go', 'C++', 'C#', 'Ruby', 'PHP', 'Swift', 'Kotlin', 'Rust', 'TypeScript', 'English', 'Русский'];
 export const getLanguageFromTags = (tags: string[]): string | null => {
+  if (!tags) return null;
   for (const tag of tags) {
     if (KNOWN_LANGUAGES.includes(tag)) {
       return tag;

@@ -319,122 +319,6 @@ const create = async (courseData, authorId) => {
   }
 };
 
-const update = async (courseId, updateData, authorId) => {
-  const client = await db.pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // 1. Check ownership and if published
-    const courseCheck = await client.query(
-      'SELECT is_published FROM courses WHERE id = $1 AND author_id = $2',
-      [courseId, authorId]
-    );
-    if (courseCheck.rows.length === 0) throw new Error('Course not found or not authorized');
-    if (courseCheck.rows[0].is_published) throw new Error('Cannot update published course. Create a new version.');
-
-    // 2. Update basic course fields
-    const { title, description, coverUrl, estimatedDuration, tags, lessonsData } = updateData;
-    const courseUpdateFields = [];
-    const courseUpdateValues = [];
-    let courseParamIdx = 1;
-
-    const addField = (field, value) => {
-      if (value !== undefined) {
-        courseUpdateFields.push(`${field} = $${courseParamIdx++}`);
-        courseUpdateValues.push(value);
-      }
-    };
-    addField('title', title);
-    addField('description', description);
-    addField('cover_url', coverUrl);
-    addField('estimated_duration', estimatedDuration);
-
-    if (courseUpdateFields.length > 0) {
-      courseUpdateValues.push(courseId);
-      await client.query(
-        `UPDATE courses SET ${courseUpdateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${courseParamIdx}`,
-        courseUpdateValues
-      );
-    }
-
-    // 3. Update Tags (delete old, insert new)
-    if (tags !== undefined) {
-      await client.query('DELETE FROM course_tags WHERE course_id = $1', [courseId]);
-      if (tags.length > 0) {
-        for (const tagName of tags) {
-          const tag = await Tag.findOrCreate(tagName, client);
-          await client.query('INSERT INTO course_tags (course_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [courseId, tag.id]);
-        }
-      }
-    }
-
-    // 4. Update Lessons and Pages (more complex: diffing or delete-recreate)
-    // For simplicity in this example, we'll do delete-recreate for lessons and their children.
-    // A more sophisticated approach would involve diffing and updating existing entities.
-    if (lessonsData !== undefined) {
-      // Delete existing lessons and their dependent content (cascade should handle pages, content, questions)
-      await client.query('DELETE FROM lessons WHERE course_id = $1', [courseId]);
-
-      let lessonSortOrder = 0;
-      for (const lessonInput of lessonsData) {
-        const lessonResult = await client.query(
-          `INSERT INTO lessons (course_id, title, description, sort_order)
-           VALUES ($1, $2, $3, $4) RETURNING id`,
-          [courseId, lessonInput.title, lessonInput.description || null, lessonSortOrder++]
-        );
-        const lessonId = lessonResult.rows[0].id;
-
-        let pageSortOrder = 0;
-        for (const pageInput of lessonInput.pages || []) {
-          const pageResult = await client.query(
-            `INSERT INTO lesson_pages (lesson_id, title, page_type, sort_order)
-             VALUES ($1, $2, $3, $4) RETURNING id`,
-            [lessonId, pageInput.title, pageInput.pageType, pageSortOrder++]
-          );
-          const pageId = pageResult.rows[0].id;
-
-          if (pageInput.pageType === 'METHODICAL' && pageInput.content) {
-            await client.query(
-              'INSERT INTO methodical_page_content (page_id, content) VALUES ($1, $2)',
-              [pageId, pageInput.content]
-            );
-          } else if (pageInput.pageType === 'ASSIGNMENT' && pageInput.questions) {
-            let questionSortOrder = 0;
-            for (const qInput of pageInput.questions) {
-              const questionResult = await client.query(
-                `INSERT INTO questions (page_id, text, type, sort_order)
-                 VALUES ($1, $2, $3, $4) RETURNING id`,
-                [pageId, qInput.text, qInput.type, questionSortOrder++]
-              );
-              const questionId = questionResult.rows[0].id;
-
-              if (qInput.options) {
-                let optionSortOrder = 0;
-                for (const optInput of qInput.options) {
-                  await client.query(
-                    `INSERT INTO question_options (question_id, label, is_correct, sort_order)
-                     VALUES ($1, $2, $3, $4)`,
-                    [questionId, optInput.label, optInput.isCorrect || false, optionSortOrder++]
-                  );
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    await client.query('COMMIT');
-    return findById(courseId);
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error("Error updating course:", error);
-    throw error;
-  } finally {
-    client.release();
-  }
-};
-
 const publish = async (courseId, authorId) => {
   const client = await db.pool.connect();
   try {
@@ -484,6 +368,125 @@ const findByAuthor = async (authorId) => {
     const lessonSummaries = await getCourseLessonSummaries(row.id); // Simplified for list view
     return formatCourseData(row, courseTags, lessonSummaries);
   }));
+};
+
+const update = async (courseId, updateData, authorId) => {
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const courseCheck = await client.query(
+      'SELECT is_published FROM courses WHERE id = $1 AND author_id = $2',
+      [courseId, authorId]
+    );
+    if (courseCheck.rows.length === 0) throw new Error('Course not found or not authorized');
+    if (courseCheck.rows[0].is_published) throw new Error('Cannot update published course. Create a new version.');
+
+    const { title, description, coverUrl, estimatedDuration, tags, lessons: lessonsData } = updateData; // переименовал lessonsData в lessons для консистентности с payload
+
+    const courseUpdateFields = [];
+    const courseUpdateValues = [];
+    let courseParamIdx = 1;
+
+    const addField = (field, value) => {
+      if (value !== undefined) { // Позволяем передавать null для сброса некоторых полей
+        courseUpdateFields.push(`${field} = $${courseParamIdx++}`);
+        courseUpdateValues.push(value);
+      }
+    };
+    addField('title', title);
+    addField('description', description);
+    addField('cover_url', coverUrl);
+    addField('estimated_duration', estimatedDuration);
+
+    if (courseUpdateFields.length > 0) {
+      courseUpdateValues.push(courseId);
+      await client.query(
+        `UPDATE courses SET ${courseUpdateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${courseParamIdx}`,
+        courseUpdateValues
+      );
+    }
+
+    if (tags !== undefined) {
+      await client.query('DELETE FROM course_tags WHERE course_id = $1', [courseId]);
+      if (Array.isArray(tags) && tags.length > 0) {
+        for (const tagName of tags) {
+          const tag = await Tag.findOrCreate(tagName, client);
+          await client.query('INSERT INTO course_tags (course_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [courseId, tag.id]);
+        }
+      }
+    }
+
+    // --- ОБНОВЛЕНИЕ УРОКОВ (подход delete-recreate) ---
+    if (lessonsData !== undefined && Array.isArray(lessonsData)) {
+      // 1. Удаляем все существующие уроки (и связанные с ними страницы, контент, вопросы через ON DELETE CASCADE)
+      await client.query('DELETE FROM lessons WHERE course_id = $1', [courseId]);
+
+      // 2. Создаем уроки заново на основе присланного массива lessonsData
+      // sort_order будет определяться порядком в массиве lessonsData
+      for (let i = 0; i < lessonsData.length; i++) {
+        const lessonInput = lessonsData[i];
+        const lessonResult = await client.query(
+          `INSERT INTO lessons (course_id, title, description, sort_order)
+           VALUES ($1, $2, $3, $4) RETURNING id`,
+          // Бэкенд должен использовать sort_order, который пришел от фронтенда (индекс массива)
+          [courseId, lessonInput.title, lessonInput.description || null, i]
+        );
+        const lessonId = lessonResult.rows[0].id;
+
+        // Если бы мы редактировали страницы и вопросы, здесь была бы логика их создания:
+        if (Array.isArray(lessonInput.pages)) {
+          for (let j = 0; j < lessonInput.pages.length; j++) {
+            const pageInput = lessonInput.pages[j];
+            const pageResult = await client.query(
+              `INSERT INTO lesson_pages (lesson_id, title, page_type, sort_order)
+               VALUES ($1, $2, $3, $4) RETURNING id`,
+              [lessonId, pageInput.title, pageInput.page_type, j] // page_type было pageType
+            );
+            const pageId = pageResult.rows[0].id;
+
+            if (pageInput.page_type === 'METHODICAL' && pageInput.content) {
+              await client.query(
+                'INSERT INTO methodical_page_content (page_id, content) VALUES ($1, $2)',
+                [pageId, pageInput.content]
+              );
+            } else if (pageInput.page_type === 'ASSIGNMENT' && Array.isArray(pageInput.questions)) {
+              for (let k = 0; k < pageInput.questions.length; k++) {
+                const qInput = pageInput.questions[k];
+                const questionResult = await client.query(
+                  `INSERT INTO questions (page_id, text, type, sort_order)
+                   VALUES ($1, $2, $3, $4) RETURNING id`,
+                  [pageId, qInput.text, qInput.type, k]
+                );
+                const questionId = questionResult.rows[0].id;
+
+                if (Array.isArray(qInput.options)) {
+                  for (let l = 0; l < qInput.options.length; l++) {
+                    const optInput = qInput.options[l];
+                    await client.query(
+                      `INSERT INTO question_options (question_id, label, is_correct, sort_order)
+                       VALUES ($1, $2, $3, $4)`,
+                      [questionId, optInput.label, optInput.is_correct || false, l]
+                    );
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // --- КОНЕЦ ОБНОВЛЕНИЯ УРОКОВ ---
+
+    await client.query('COMMIT');
+    return findById(courseId); // Важно вернуть обновленный курс с новыми ID уроков
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("Error updating course:", error);
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 module.exports = {
