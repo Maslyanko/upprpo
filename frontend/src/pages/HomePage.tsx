@@ -1,63 +1,69 @@
+// ==== File: frontend/src/pages/HomePage.tsx ====
 import React, { useEffect, useRef, useState } from 'react';
 import HeroSection from '../components/HeroSection';
 import SearchBar from '../components/SearchBar';
 import CourseList from '../components/CourseList';
-import { useCourses, CourseFilters } from '../hooks/useCourses';
+import { useCourses, CourseFilters, defaultCourseFilters } from '../hooks/useCourses';
 
-const initialCourseFilters: CourseFilters = {
-  sort: 'popularity',
-  tags: [],
-  search: '',
-  level: undefined,
-  language: undefined,
-};
+// Assuming COMMON_LANGUAGE_TAG_OPTIONS is available or defined here/imported
+const COMMON_LANGUAGE_TAG_OPTIONS: Readonly<string[]> = [
+    'Python', 'JavaScript', 'Java', 'SQL', 'Go', 'C++', 'C#', 'Русский', 'English'
+];
 
 const HomePage: React.FC = () => {
-  const { courses, loading, error, filters: currentActiveFilters, applyFilters } = useCourses();
+  // Initialize with defaultCourseFilters to ensure all filter fields are defined
+  const { courses, loading, error, filters: currentActiveFilters, applyFilters } = useCourses(defaultCourseFilters);
   const catalogRef = useRef<HTMLDivElement>(null);
-  // State for the search bar input, controlled by HomePage
   const [searchTerm, setSearchTerm] = useState(currentActiveFilters.search || '');
 
   useEffect(() => {
     document.title = 'AI-Hunt - Подготовка к IT собеседованиям';
   }, []);
 
-  // Sync searchTerm with external changes to currentActiveFilters.search
-  // (e.g., if filters are reset or tag click clears search)
   useEffect(() => {
     if (currentActiveFilters.search !== searchTerm) {
       setSearchTerm(currentActiveFilters.search || '');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentActiveFilters.search]);
-
+  }, [currentActiveFilters.search, searchTerm]); // Added searchTerm to deps to avoid potential stale closure issue
 
   const handleSearch = () => {
     applyFilters({
-      sort: currentActiveFilters.sort || 'popularity',
-      search: searchTerm, // Use the local searchTerm state
-      tags: [],
-      level: undefined,
-      language: undefined,
+      ...defaultCourseFilters,
+      sort: currentActiveFilters.sort || defaultCourseFilters.sort,
+      search: searchTerm.trim(),
     });
   };
 
   const handleTagClick = (tag: string) => {
-    setSearchTerm(''); // Clear search term when a tag is clicked
+    setSearchTerm('');
+    let newLevel: CourseFilters['level'] | undefined = undefined;
+    let newLanguage: string | undefined = undefined;
+    const otherTags: string[] = [];
+
+    if (['Beginner', 'Middle', 'Senior'].includes(tag)) {
+      newLevel = tag as CourseFilters['level'];
+    } else if (COMMON_LANGUAGE_TAG_OPTIONS.includes(tag)) {
+      newLanguage = tag;
+    } else {
+      otherTags.push(tag);
+    }
+
     applyFilters({
-      sort: currentActiveFilters.sort || 'popularity',
-      search: '',
-      tags: [tag],
-      level: undefined,
-      language: undefined,
+      ...defaultCourseFilters,
+      sort: currentActiveFilters.sort || defaultCourseFilters.sort,
+      level: newLevel,
+      language: newLanguage,
+      tags: otherTags,
     });
-    catalogRef.current?.scrollIntoView({ behavior: 'smooth' });
+    catalogRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const handleResetFilters = () => {
-    setSearchTerm(''); // Clear local search term state
-    applyFilters(initialCourseFilters);
+    setSearchTerm('');
+    applyFilters(defaultCourseFilters);
   };
+
+  // console.log("HomePage rendering. Loading:", loading, "Error:", error, "Courses:", courses.length); // DEBUG
 
   return (
     <div>
@@ -67,30 +73,23 @@ const HomePage: React.FC = () => {
           <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center sm:text-left">
             Каталог курсов
           </h2>
-          <div className="flex items-center gap-x-3 mb-8">
-            <div className="flex-grow">
-              <SearchBar
-                value={searchTerm}
-                onChange={setSearchTerm} // Controlled component: update searchTerm
-                onSearch={handleSearch} // Trigger search using HomePage's searchTerm
-                placeholder="Поиск по названию, автору или тегам..."
-              />
-            </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-8">
+            <SearchBar
+              value={searchTerm}
+              onChange={setSearchTerm}
+              onSearch={handleSearch}
+              placeholder="Поиск по названию, автору или тегам..."
+            />
             <button
               onClick={handleResetFilters}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+              className="btn-outline px-4 py-2.5 text-sm whitespace-nowrap" // Assuming btn-outline is defined
               title="Сбросить все фильтры и поиск"
             >
-              Сбросить
+              Сбросить фильтры
             </button>
           </div>
-          {/* Wrapper for CourseList to prevent layout jumps */}
-          <div className="min-h-[300px]"> {/* Adjust min-height as needed */}
-            <CourseList
-              courses={courses}
-              loading={loading}
-              error={error}
-            />
+          <div className="min-h-[300px]"> {/* Ensure this has a min height to be visible if CourseList content is delayed/empty */}
+            <CourseList courses={courses} loading={loading} error={error} />
           </div>
         </div>
       </div>

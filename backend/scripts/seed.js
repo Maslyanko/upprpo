@@ -1,349 +1,213 @@
-/**
- * Скрипт для заполнения базы данных тестовыми данными
- * Запуск: node scripts/seed.js
- */
-
+// ==== File: backend/scripts/seed.js ====
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
-const db = require('../config/db');
-const { v4: uuidv4 } = require('uuid');
+const db = require('../config/db'); // Assuming db.pool for client usage
+const TagModel = require('../models/Tag'); // To use findOrCreate
 
-// Тестовые данные
-const users = [
-  {
-    email: 'ivan@example.com',
-    password: 'password',
-    fullName: 'Иван Иванов',
-  },
-  {
-    email: 'polina@example.com',
-    password: 'password',
-    fullName: 'Полина Смирнова',
-  },
-  {
-    email: 'user@example.com',
-    password: 'password',
-    fullName: 'Тестовый Пользователь',
-  }
+// --- Test Data Definitions ---
+const usersData = [
+  { email: 'ivan@example.com', password: 'password', fullName: 'Иван Иванов' },
+  { email: 'polina@example.com', password: 'password', fullName: 'Полина Смирнова' },
+  { email: 'user@example.com', password: 'password', fullName: 'Тестовый Пользователь' },
 ];
 
-const courses = [
+const predefinedTags = [
+    "Python", "JavaScript", "SQL", "Java", "C++", "Go", "Ruby", "PHP",
+    "Beginner", "Middle", "Senior",
+    "Backend", "Frontend", "Fullstack", "DevOps", "Data Science", "Machine Learning",
+    "Algorithms", "Data Structures", "System Design", "Soft Skills", "Interview Prep",
+    "Web Development", "Mobile Development", "Game Development", "Cybersecurity",
+    "Cloud Computing", "AWS", "Azure", "GCP", "Docker", "Kubernetes", "Terraform",
+    "React", "Angular", "Vue.js", "Node.js", "Django", "Flask", "Spring Boot",
+    "Analytics", "Excel", "HR", "Agile", "Scrum", "Product Management"
+];
+
+
+const coursesData = [
   {
     title: 'Подготовка к Python Middle собеседованию',
     description: 'Полноценный курс для подготовки к Python Middle собеседованиям.',
-    difficulty: 'Middle',
-    language: 'Python',
+    tags: ['Python', 'Middle', 'Backend', 'Algorithms'], // Tag names
+    authorEmail: 'ivan@example.com',
     coverUrl: '/images/courses/python.png',
-    tags: ['Python', 'Backend', 'Algorithms'],
-    authorIndex: 0,
+    estimatedDuration: 20,
     lessons: [
-      { title: 'Основы Python', type: 'Theory', hasQuiz: true },
-      { title: 'Структуры данных', type: 'Theory', hasQuiz: true },
-      { title: 'Алгоритмы', type: 'Coding', hasQuiz: true }
+      {
+        title: 'Основы Python для Middle', description: 'Ключевые концепции Python.',
+        pages: [
+          { title: 'Введение в GIL', pageType: 'METHODICAL', content: '# GIL\nGlobal Interpreter Lock...' },
+          { title: 'Декораторы', pageType: 'METHODICAL', content: '# Декораторы\nПримеры декораторов...' },
+          {
+            title: 'Тест по основам', pageType: 'ASSIGNMENT',
+            questions: [
+              { text: 'Что такое GIL?', type: 'TEXT_INPUT' },
+              { text: 'Приведите пример замыкания.', type: 'CODE_INPUT' },
+            ]
+          }
+        ]
+      },
+      // More lessons
     ]
   },
-  {
-    title: 'Алгоритмы и структуры данных для собеседований',
-    description: 'Разбор алгоритмов и структур данных, которые часто спрашивают на собеседованиях.',
-    difficulty: 'Middle',
-    language: 'JavaScript',
-    coverUrl: '/images/courses/algos.png',
-    tags: ['Algorithms', 'Data Structures', 'Leetcode'],
-    authorIndex: 1,
-    lessons: [
-      { title: 'Сложность алгоритмов', type: 'Theory', hasQuiz: true },
-      { title: 'Сортировки', type: 'Coding', hasQuiz: true },
-      { title: 'Деревья и графы', type: 'Theory', hasQuiz: true }
-    ]
-  },
-  {
-    title: 'Интервью аналитика: SQL, Excel, кейсы',
-    description: 'Всё, что нужно для успешного прохождения собеседования на позицию аналитика.',
-    difficulty: 'Beginner',
-    language: 'SQL',
-    coverUrl: '/images/courses/anal.png',
-    tags: ['SQL', 'Analytics', 'Excel'],
-    authorIndex: 0,
-    lessons: [
-      { title: 'Основы SQL', type: 'Theory', hasQuiz: true },
-      { title: 'Сложные запросы', type: 'Coding', hasQuiz: true },
-      { title: 'Аналитические кейсы', type: 'Theory', hasQuiz: false }
-    ]
-  },
-  {
-    title: 'Расскажи о себе: soft skills на собеседовании',
-    description: 'Как успешно презентовать себя и свои навыки на собеседовании.',
-    difficulty: 'Beginner',
-    language: 'Русский',
-    coverUrl: '/images/courses/softs.png',
-    tags: ['Soft skills', 'HR', 'Interview'],
-    authorIndex: 1,
-    lessons: [
-      { title: 'Самопрезентация', type: 'Theory', hasQuiz: true },
-      { title: 'Сложные вопросы', type: 'Theory', hasQuiz: true },
-      { title: 'Обратная связь', type: 'Theory', hasQuiz: false }
-    ]
-  },
-  {
-    title: 'System Design для Senior',
-    description: 'Подготовка к вопросам по системному дизайну для позиции Senior Developer.',
-    difficulty: 'Senior',
-    language: 'English',
-    coverUrl: '/images/courses/sysdis.png',
-    tags: ['System Design', 'Architecture', 'Senior'],
-    authorIndex: 0,
-    lessons: [
-      { title: 'Основы системного дизайна', type: 'Theory', hasQuiz: true },
-      { title: 'Масштабирование', type: 'Theory', hasQuiz: true },
-      { title: 'Практические кейсы', type: 'Coding', hasQuiz: true }
-    ]
-  },
-  {
-    title: 'JavaScript для Junior Frontend',
-    description: 'Всё, что нужно знать Junior Frontend разработчику о JavaScript.',
-    difficulty: 'Beginner',
-    language: 'JavaScript',
-    coverUrl: '/images/courses/js.png',
-    tags: ['JavaScript', 'Frontend', 'Web'],
-    authorIndex: 1,
-    lessons: [
-      { title: 'Основы JavaScript', type: 'Theory', hasQuiz: true },
-      { title: 'DOM манипуляции', type: 'Theory', hasQuiz: true },
-      { title: 'Асинхронный JavaScript', type: 'Coding', hasQuiz: true }
-    ]
-  }
+  // More courses
 ];
 
-// Функция для заполнения базы данных
+
 async function seedDatabase() {
   const client = await db.pool.connect();
-  
   try {
     await client.query('BEGIN');
-    
     console.log('Очистка таблиц...');
-    
-    // Используем TRUNCATE с CASCADE вместо DELETE для более надежной очистки
-    try {
-      // Отключаем проверку внешних ключей на время очистки (опционально)
-      // await client.query('SET session_replication_role = replica;');
-      
-      // Удаляем данные из таблиц, очищая их все за один запрос с учетом зависимостей
-      await client.query(`
-        TRUNCATE TABLE 
-          ratings, 
-          enrollments, 
-          lesson_progress, 
-          question_options, 
-          questions, 
-          lesson_content, 
-          lessons, 
-          course_tags, 
-          course_stats, 
-          courses, 
-          user_stats, 
-          users
-        CASCADE;
-      `);
-      
-      // Восстанавливаем проверку внешних ключей (если отключали)
-      // await client.query('SET session_replication_role = DEFAULT;');
-    } catch (error) {
-      console.error('Ошибка при очистке таблиц:', error);
-      throw error;
+    // Order matters due to FK constraints if not using CASCADE effectively
+    await client.query('TRUNCATE TABLE ratings, enrollments, lesson_progress, question_options, questions, methodical_page_content, lesson_pages, lessons, course_tags, course_stats, courses, tags, users CASCADE;');
+    console.log('Таблицы очищены.');
+
+    // 1. Seed Tags
+    console.log('Создание тегов...');
+    const createdTagsMap = new Map(); // name -> id
+    for (const tagName of predefinedTags) {
+        const tag = await TagModel.findOrCreate(tagName, client);
+        createdTagsMap.set(tag.name, tag.id);
     }
-    
+    console.log(`${createdTagsMap.size} тегов создано/найдено.`);
+
+    // 2. Seed Users
     console.log('Создание пользователей...');
-    
-    // Создаем пользователей
-    const createdUserIds = [];
-    
-    for (const user of users) {
-      const hashedPassword = await bcrypt.hash(user.password, 10);
-      
-      const result = await client.query(
-        `INSERT INTO users (email, password, full_name) 
-         VALUES ($1, $2, $3) 
-         RETURNING id`,
-        [user.email, hashedPassword, user.fullName]
+    const createdUsersMap = new Map(); // email -> id
+    for (const userData of usersData) {
+      const hashedPassword = await bcrypt.hash(userData.password, 10);
+      const userResult = await client.query(
+        'INSERT INTO users (email, password, full_name) VALUES ($1, $2, $3) RETURNING id, email',
+        [userData.email, hashedPassword, userData.fullName]
       );
-      
-      const userId = result.rows[0].id;
-      createdUserIds.push(userId);
-      
-      await client.query(
-        `INSERT INTO user_stats (user_id, active_courses, completed_courses, avg_score) 
-         VALUES ($1, $2, $3, $4)`,
-        [userId, 0, 0, 0]
-      );
+      createdUsersMap.set(userResult.rows[0].email, userResult.rows[0].id);
     }
-    
+    console.log(`${createdUsersMap.size} пользователей создано.`);
+
+    // 3. Seed Courses, Lessons, Pages, Questions
     console.log('Создание курсов...');
-    
-    // Создаем курсы
-    for (const course of courses) {
-      const authorId = createdUserIds[course.authorIndex];
-      
-      const result = await client.query(
-        `INSERT INTO courses 
-           (author_id, title, description, difficulty, language, cover_url, estimated_duration, version, is_published) 
-         VALUES 
-           ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
-         RETURNING id`,
-        [authorId, course.title, course.description, course.difficulty, course.language, 
-         course.coverUrl, course.lessons.length * 2, 1, true]
-      );
-      
-      const courseId = result.rows[0].id;
-      
-      // Добавляем статистику курса
-      await client.query(
-        `INSERT INTO course_stats 
-           (course_id, enrollments, avg_completion, avg_score) 
-         VALUES 
-           ($1, $2, $3, $4)`,
-        [courseId, Math.floor(Math.random() * 300), Math.floor(Math.random() * 40) + 60, (Math.random() * 1.5) + 3.5]
-      );
-      
-      // Добавляем теги
-      for (const tag of course.tags) {
-        await client.query(
-          `INSERT INTO course_tags (course_id, tag) VALUES ($1, $2)`,
-          [courseId, tag]
-        );
+    for (const courseItem of coursesData) {
+      const authorId = createdUsersMap.get(courseItem.authorEmail);
+      if (!authorId) {
+        console.warn(`Автор ${courseItem.authorEmail} не найден для курса ${courseItem.title}. Пропуск курса.`);
+        continue;
       }
-      
-      // Добавляем уроки
-      for (let i = 0; i < course.lessons.length; i++) {
-        const lesson = course.lessons[i];
-        
-        const lessonResult = await client.query(
-          `INSERT INTO lessons 
-             (course_id, title, type, sort_order) 
-           VALUES 
-             ($1, $2, $3, $4) 
-           RETURNING id`,
-          [courseId, lesson.title, lesson.type, i]
+
+      // Create Course
+      const courseRes = await client.query(
+        `INSERT INTO courses (author_id, title, description, cover_url, estimated_duration, version, is_published)
+         VALUES ($1, $2, $3, $4, $5, 1, true) RETURNING id`,
+        [authorId, courseItem.title, courseItem.description, courseItem.coverUrl, courseItem.estimatedDuration]
+      );
+      const courseId = courseRes.rows[0].id;
+
+      // Create Course Stats
+      await client.query('INSERT INTO course_stats (course_id, enrollments, avg_completion, avg_rating) VALUES ($1, $2, $3, $4)',
+        [courseId, Math.floor(Math.random() * 100), Math.random() * 100, (Math.random() * 2 + 3).toFixed(2) ] // Random stats
+      );
+
+      // Link Tags to Course
+      for (const tagName of courseItem.tags) {
+        const tagId = createdTagsMap.get(tagName);
+        if (tagId) {
+          await client.query('INSERT INTO course_tags (course_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [courseId, tagId]);
+        } else {
+          console.warn(`Тег "${tagName}" не найден в predefinedTags для курса ${courseItem.title}`);
+        }
+      }
+
+      // Create Lessons
+      let lessonSortOrder = 0;
+      for (const lessonItem of courseItem.lessons || []) {
+        const lessonRes = await client.query(
+          `INSERT INTO lessons (course_id, title, description, sort_order)
+           VALUES ($1, $2, $3, $4) RETURNING id`,
+          [courseId, lessonItem.title, lessonItem.description, lessonSortOrder++]
         );
-        
-        const lessonId = lessonResult.rows[0].id;
-        
-        // Добавляем содержимое урока
-        await client.query(
-          `INSERT INTO lesson_content 
-             (lesson_id, content, video_url) 
-           VALUES 
-             ($1, $2, $3)`,
-          [lessonId, `# ${lesson.title}\n\nЭто содержимое урока ${lesson.title} курса ${course.title}.`, null]
-        );
-        
-        // Добавляем вопросы для квиза
-        if (lesson.hasQuiz) {
-          for (let j = 0; j < 3; j++) {
-            const questionResult = await client.query(
-              `INSERT INTO questions 
-                 (lesson_id, text, type, sort_order) 
-               VALUES 
-                 ($1, $2, $3, $4) 
-               RETURNING id`,
-              [lessonId, `Вопрос ${j+1} для урока ${lesson.title}`, j === 0 ? 'choice' : (j === 1 ? 'shortText' : 'longText'), j]
+        const lessonId = lessonRes.rows[0].id;
+
+        // Create Lesson Pages
+        let pageSortOrder = 0;
+        for (const pageItem of lessonItem.pages || []) {
+          const pageRes = await client.query(
+            `INSERT INTO lesson_pages (lesson_id, title, page_type, sort_order)
+             VALUES ($1, $2, $3, $4) RETURNING id`,
+            [lessonId, pageItem.title, pageItem.pageType, pageSortOrder++]
+          );
+          const pageId = pageRes.rows[0].id;
+
+          // Create Methodical Page Content
+          if (pageItem.pageType === 'METHODICAL' && pageItem.content) {
+            await client.query('INSERT INTO methodical_page_content (page_id, content) VALUES ($1, $2)',
+              [pageId, pageItem.content]
             );
-            
-            const questionId = questionResult.rows[0].id;
-            
-            // Добавляем варианты ответов для вопросов с выбором
-            if (j === 0) {
-              for (let k = 0; k < 4; k++) {
+          }
+          // Create Questions for Assignment Pages
+          else if (pageItem.pageType === 'ASSIGNMENT' && pageItem.questions) {
+            let questionSortOrder = 0;
+            for (const questionItem of pageItem.questions) {
+              const questionRes = await client.query(
+                `INSERT INTO questions (page_id, text, type, sort_order)
+                 VALUES ($1, $2, $3, $4) RETURNING id`,
+                [pageId, questionItem.text, questionItem.type, questionSortOrder++]
+              );
+              const questionId = questionRes.rows[0].id;
+
+              // Create Question Options
+              let optionSortOrder = 0;
+              for (const optionItem of questionItem.options || []) {
                 await client.query(
-                  `INSERT INTO question_options 
-                     (question_id, label, is_correct, sort_order) 
-                   VALUES 
-                     ($1, $2, $3, $4)`,
-                  [questionId, `Вариант ${k+1}`, k === 0, k]
+                  `INSERT INTO question_options (question_id, label, is_correct, sort_order)
+                   VALUES ($1, $2, $3, $4)`,
+                  [questionId, optionItem.label, optionItem.isCorrect || false, optionSortOrder++]
                 );
               }
             }
           }
         }
       }
-      
-      console.log(`Создан курс: ${course.title}`);
+      console.log(`Курс "${courseItem.title}" создан.`);
     }
-    
-    console.log('Создание записей на курсы...');
-    
-    // Записываем обычного пользователя на несколько курсов
-    const userId = createdUserIds[2]; // ID обычного пользователя
-    
-    // Получаем курсы
-    const coursesResult = await client.query('SELECT id FROM courses LIMIT 3');
-    const courseIds = coursesResult.rows.map(row => row.id);
-    
-    // Записываем на курсы
-    for (let i = 0; i < courseIds.length; i++) {
-      const courseId = courseIds[i];
-      
-      await client.query(
-        `INSERT INTO enrollments 
-           (user_id, course_id, status, progress, started_at) 
-         VALUES 
-           ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
-        [userId, courseId, i === 0 ? 'completed' : 'inProgress', i === 0 ? 100 : Math.floor(Math.random() * 70)]
-      );
-      
-      // Обновляем статистику
-      await client.query(
-        `UPDATE user_stats 
-         SET active_courses = active_courses + CASE WHEN $1 = 'inProgress' THEN 1 ELSE 0 END,
-             completed_courses = completed_courses + CASE WHEN $1 = 'completed' THEN 1 ELSE 0 END 
-         WHERE user_id = $2`,
-        [i === 0 ? 'completed' : 'inProgress', userId]
-      );
-      
-      await client.query(
-        `UPDATE course_stats 
-         SET enrollments = enrollments + 1 
-         WHERE course_id = $1`,
-        [courseId]
-      );
-      
-      // Оцениваем законченный курс
-      if (i === 0) {
-        await client.query(
-          `INSERT INTO ratings 
-             (user_id, course_id, value, created_at) 
-           VALUES 
-             ($1, $2, $3, CURRENT_TIMESTAMP)`,
-          [userId, courseId, 5]
-        );
-        
-        // Обновляем среднюю оценку курса
-        await client.query(
-          `UPDATE course_stats 
-           SET avg_score = 
-             (SELECT AVG(value)::numeric(5,2) FROM ratings WHERE course_id = $1) 
-           WHERE course_id = $1`,
-          [courseId]
-        );
-      }
+
+    // 4. Seed Enrollments and Ratings (Example for 'user@example.com')
+    const testUserId = createdUsersMap.get('user@example.com');
+    if (testUserId) {
+        console.log('Создание записей и оценок для user@example.com...');
+        const someCoursesRes = await client.query('SELECT id FROM courses WHERE author_id != $1 LIMIT 2', [testUserId]); // Enroll in courses not authored by testUser
+        for (const courseRow of someCoursesRes.rows) {
+            const courseIdToEnroll = courseRow.id;
+            // Enroll
+            await client.query(
+                `INSERT INTO enrollments (user_id, course_id, status, progress, started_at, finished_at)
+                 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5)`,
+                [testUserId, courseIdToEnroll, Math.random() > 0.5 ? 'completed' : 'inProgress', Math.random() * 100, Math.random() > 0.5 ? CURRENT_TIMESTAMP : null]
+            );
+             // Rate if completed
+            if (Math.random() > 0.5) { // Simulate some completed courses being rated
+                await client.query(
+                    `INSERT INTO ratings (user_id, course_id, value, comment)
+                     VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+                    [testUserId, courseIdToEnroll, Math.floor(Math.random() * 3) + 3, 'Отличный курс!']
+                );
+                // Trigger update of course_stats.avg_rating (could be a trigger in DB too)
+                await client.query(
+                  `UPDATE course_stats SET avg_rating = (SELECT AVG(value) FROM ratings WHERE course_id = $1) WHERE course_id = $1`,
+                  [courseIdToEnroll]
+                );
+            }
+        }
     }
-    
+
+
     await client.query('COMMIT');
-    
     console.log('База данных успешно заполнена тестовыми данными!');
-    console.log('\nДанные для входа:');
-    for (const user of users) {
-      console.log(`- ${user.email}: ${user.password}`);
-    }
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Ошибка при заполнении базы данных:', error);
   } finally {
     client.release();
-    // Закрываем пул соединений
-    db.pool.end();
+    db.pool.end(); // Close all connections in the pool
   }
 }
 
-// Запускаем заполнение
 seedDatabase();

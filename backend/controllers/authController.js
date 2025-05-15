@@ -1,3 +1,4 @@
+// ==== File: backend/controllers/authController.js ====
 const User = require('../models/User');
 const { generateToken } = require('../utils/jwt');
 
@@ -9,23 +10,34 @@ const register = async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
 
-    // Проверяем, существует ли уже пользователь с таким email
-    const existingUser = await User.findByEmail(email);
-    if (existingUser) {
+    const existingUserByEmail = await User.findByEmail(email, true); // Check if email exists
+    if (existingUserByEmail) {
       return res.status(409).json({
         code: 'EMAIL_EXISTS',
         message: 'Email уже зарегистрирован'
       });
     }
 
-    // Создаем нового пользователя
     const newUser = await User.create({
       email,
       password,
-      fullName: fullName || email.split('@')[0] // Временное имя по умолчанию
+      fullName: fullName || email.split('@')[0]
+    });
+    
+    // newUser here is already formatted by User.create (which calls User.findById)
+    // It includes dynamic stats.
+
+    // For consistency with login, generate a token and return it
+     const token = generateToken({
+      id: newUser.id,
+      email: newUser.email,
     });
 
-    res.status(201).json(newUser);
+    res.status(201).json({
+        user: newUser, // Send the full user object with stats
+        accessToken: token
+    });
+
   } catch (error) {
     console.error('Register error:', error);
     res.status(500).json({
@@ -41,19 +53,18 @@ const register = async (req, res) => {
  */
 const login = async (req, res) => {
   try {
-    const { email, password, fullName } = req.body;
+    const { email, password } = req.body; // fullName not used for login
 
-    // Находим пользователя по email (получаем полные данные включая пароль)
-    const user = await User.findByEmail(email);
-    if (!user) {
+    // Find user by email, including password hash for comparison
+    const userWithPassword = await User.findByEmail(email, true);
+    if (!userWithPassword) {
       return res.status(401).json({
         code: 'INVALID_CREDENTIALS',
         message: 'Неверный email или пароль'
       });
     }
 
-    // Проверяем пароль
-    const isPasswordValid = await User.comparePassword(password, user.password);
+    const isPasswordValid = await User.comparePassword(password, userWithPassword.password);
     if (!isPasswordValid) {
       return res.status(401).json({
         code: 'INVALID_CREDENTIALS',
@@ -61,16 +72,16 @@ const login = async (req, res) => {
       });
     }
 
-    // Генерируем токен
     const token = generateToken({
-      id: user.id, 
-      email: user.email, 
+      id: userWithPassword.id,
+      email: userWithPassword.email,
     });
 
-    // Форматируем данные пользователя для ответа (без пароля)
-    const userForResponse = User.formatUserData(user);
+    // Fetch user data again, this time formatted and with stats
+    const userForResponse = await User.findById(userWithPassword.id);
 
     res.status(200).json({
+      user: userForResponse, // Send the full user object with stats
       accessToken: token
     });
   } catch (error) {

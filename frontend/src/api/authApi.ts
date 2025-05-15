@@ -1,3 +1,4 @@
+// ==== File: frontend/src/api/authApi.ts ====
 import client from './client';
 import type { User } from '../types/User';
 
@@ -12,53 +13,45 @@ interface RegisterData {
   fullName: string;
 }
 
-interface AuthTokenResponse {
+interface AuthResponse { // Backend now returns user object along with token
+  user: User;
   accessToken: string;
 }
 
 export async function login(data: LoginData): Promise<User> {
   try {
-    // Get token
-    const response = await client.post<AuthTokenResponse>('/auth/login', data);
-    const { accessToken } = response.data;
+    const response = await client.post<AuthResponse>('/auth/login', data);
+    const { user, accessToken } = response.data;
+
     localStorage.setItem('token', accessToken);
-    
-    // Get user information
-    const userResponse = await client.get<User>('/users/me');
-    localStorage.setItem('user', JSON.stringify(userResponse.data));
-    
-    return userResponse.data;
+    localStorage.setItem('user', JSON.stringify(user)); // Store the user object from response
+
+    return user;
   } catch (error) {
     console.error('Login API error:', error);
+    // Clear potentially outdated/invalid local storage on critical auth errors
+    if ((error as any).response?.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+    }
     throw error;
   }
 }
 
 export async function register(data: RegisterData): Promise<User> {
   try {
-    // Register user
-    await client.post('/auth/register', {
+    // Register user - backend now logs in and returns user + token directly
+    const response = await client.post<AuthResponse>('/auth/register', {
       email: data.email,
       password: data.password,
       fullName: data.fullName
     });
+    const { user, accessToken } = response.data;
 
-    // Login after registration
-    const loginResponse = await client.post<AuthTokenResponse>('/auth/login', {
-      email: data.email,
-      password: data.password
-    });
-    
-    const { accessToken } = loginResponse.data;
     localStorage.setItem('token', accessToken);
+    localStorage.setItem('user', JSON.stringify(user));
 
-    // Update profile with full name
-    const userResponse = await client.patch<User>('/users/me', {
-      fullName: data.fullName
-    });
-    
-    localStorage.setItem('user', JSON.stringify(userResponse.data));
-    return userResponse.data;
+    return user;
   } catch (error) {
     console.error('Register API error:', error);
     throw error;
@@ -68,6 +61,6 @@ export async function register(data: RegisterData): Promise<User> {
 export function logout() {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
-  // Force refresh to reset application state
-  window.location.href = '/';
+  // Consider using react-router navigate for SPA-friendly redirection
+  window.location.href = '/'; // Force refresh to reset application state
 }

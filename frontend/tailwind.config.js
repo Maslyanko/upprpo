@@ -42,7 +42,7 @@ export default {
         keyframes: { // <-- ADDED KEYFRAMES
           marquee: {
             '0%': { transform: 'translateX(0%)' },
-            '100%': { transform: 'translateX(-100%)' }, // Сдвигаем на всю ширину дублированного контента
+            '100%': { transform: 'translateX(-50%)' }, // Сдвигаем на всю ширину дублированного контента
           },
           'marquee-reverse': { // Для движения в обратную сторону
             '0%': { transform: 'translateX(-100%)' },

@@ -1,74 +1,95 @@
-import { useState, useEffect } from 'react';
+// ==== File: frontend/src/hooks/useAuth.ts ====
+import { useState, useEffect, useCallback } from 'react';
 import { login as apiLogin, register as apiRegister, logout as apiLogout } from '../api/authApi';
+// It's good practice to also fetch user data on initial load if token exists,
+// to verify token and get fresh user data.
+import { getCurrentUser } from '../api/userApi'; // Import getCurrentUser
 import type { User } from '../types/User';
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // For initial auth state loading AND token verification
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch (e) {
-        console.error('Failed to parse user data', e);
-        localStorage.removeItem('user'); // Clear invalid data
+    const verifyTokenAndFetchUser = async () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          // console.log("useAuth: Token found, verifying and fetching user..."); // DEBUG
+          const freshUser = await getCurrentUser(); // Fetches /users/me using the token
+          setUser(freshUser);
+          localStorage.setItem('user', JSON.stringify(freshUser)); // Update stored user
+          // console.log("useAuth: User fetched successfully", freshUser); // DEBUG
+        } catch (error) {
+          // console.error("useAuth: Token verification/user fetch failed", error); // DEBUG
+          // Token might be invalid or expired
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+        }
+      } else {
+        // console.log("useAuth: No token found."); // DEBUG
+        // No token, ensure user is null if there was any stale data
+        setUser(null);
+        localStorage.removeItem('user'); // Clean up potentially stale user data if token is gone
       }
-    }
-    setIsLoading(false);
-  }, []);
+      setIsLoading(false);
+    };
 
-  const login = async (email: string, password: string): Promise<User> => {
-    try {
-      // Call API login function
-      const response = await apiLogin({ email, password });
-      // Make sure user data is stored in localStorage
-      if (response) {
-        setUser(response);
-        localStorage.setItem('user', JSON.stringify(response));
-      }
-      return response;
-    } catch (error) {
-      console.error('Login error:', error);
-      throw error;
-    }
-  };
+    verifyTokenAndFetchUser();
+  }, []); // Runs once on mount
 
-  const register = async (email: string, password: string, fullName: string): Promise<User> => {
+  const login = useCallback(async (email: string, password: string): Promise<User> => {
+    setIsLoading(true); // Indicate loading during login process
     try {
-      // Call API register function
-      const userData = await apiRegister({ email, password, fullName });
-      // Make sure user data is stored in localStorage
-      if (userData) {
-        setUser(userData);
-        localStorage.setItem('user', JSON.stringify(userData));
-      }
+      const userData = await apiLogin({ email, password });
+      setUser(userData);
+      // localStorage is handled by apiLogin
+      setIsLoading(false);
       return userData;
     } catch (error) {
-      console.error('Register error:', error);
+      setUser(null);
+      setIsLoading(false);
+      console.error('useAuth login error:', error);
       throw error;
     }
-  };
+  }, []);
 
-  const logout = () => {
-    apiLogout();
+  const register = useCallback(async (email: string, password: string, fullName: string): Promise<User> => {
+    setIsLoading(true); // Indicate loading
+    try {
+      const userData = await apiRegister({ email, password, fullName });
+      setUser(userData);
+      // localStorage is handled by apiRegister
+      setIsLoading(false);
+      return userData;
+    } catch (error) {
+      setUser(null);
+      setIsLoading(false);
+      console.error('useAuth register error:', error);
+      throw error;
+    }
+  }, []);
+
+  const logout = useCallback(() => {
+    apiLogout(); // Handles localStorage
     setUser(null);
-  };
+    // No need to setIsLoading here unless logout involves async operations.
+    // Redirect is handled by apiLogout or component.
+  }, []);
 
-  // Function to update user state without API request
-  const updateUserState = (updatedUser: User) => {
+  const updateUserState = useCallback((updatedUser: User) => {
     setUser(updatedUser);
     localStorage.setItem('user', JSON.stringify(updatedUser));
-  };
+  }, []);
 
   return {
     user,
-    isLoading,
+    isLoading, // True while checking auth token or during login/register
     login,
     register,
     logout,
     updateUserState,
-    isAuthenticated: !!user
+    isAuthenticated: !!user && !!localStorage.getItem('token'),
   };
 }

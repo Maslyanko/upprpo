@@ -1,26 +1,85 @@
+// ==== File: backend/models/User.js ====
 const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 
 /**
+ * Calculate user statistics dynamically.
+ * @param {string} userId - The ID of the user.
+ * @returns {Promise<Object>} User statistics object.
+ */
+const calculateUserStats = async (userId) => {
+  // Active courses: count of enrollments with status 'inProgress'
+  const activeCoursesResult = await db.query(
+    "SELECT COUNT(*) as count FROM enrollments WHERE user_id = $1 AND status = 'inProgress'",
+    [userId]
+  );
+  const activeCourses = parseInt(activeCoursesResult.rows[0].count, 10) || 0;
+
+  // Completed courses: count of enrollments with status 'completed'
+  const completedCoursesResult = await db.query(
+    "SELECT COUNT(*) as count FROM enrollments WHERE user_id = $1 AND status = 'completed'",
+    [userId]
+  );
+  const completedCourses = parseInt(completedCoursesResult.rows[0].count, 10) || 0;
+
+  // Average score: This is complex.
+  // For now, let's use average of ratings GIVEN BY the user for completed courses.
+  // Or average progress if no ratings. This is a placeholder and might need refinement.
+  // A more robust avg_score would involve scores from lesson_progress or question attempts.
+  // For simplicity, we will set it to 0 for now as the original user_stats.avg_score was also likely a placeholder.
+  const avgScore = 0; // Placeholder
+
+  return {
+    activeCourses,
+    completedCourses,
+    avgScore, // Placeholder for now
+  };
+};
+
+/**
+ * Formats user data for API response, including calculated stats.
+ * @param {Object} userData - Raw user data from the database.
+ * @param {Object} stats - Calculated user statistics.
+ * @returns {Object} Formatted user data.
+ */
+const formatUserDataWithStats = (userData, stats) => {
+  const { password, ...userWithoutPassword } = userData; // Exclude password
+  return {
+    id: userWithoutPassword.id,
+    email: userWithoutPassword.email,
+    fullName: userWithoutPassword.full_name,
+    avatarUrl: userWithoutPassword.avatar_url,
+    createdAt: userWithoutPassword.created_at,
+    updatedAt: userWithoutPassword.updated_at,
+    stats: stats || { activeCourses: 0, completedCourses: 0, avgScore: 0 },
+  };
+};
+
+
+/**
  * Поиск пользователя по email
  * @param {string} email - Email пользователя
+ * @param {boolean} includePassword - Whether to include the password hash (for login).
  * @returns {Promise<Object|null>} - Найденный пользователь или null
  */
-const findByEmail = async (email) => {
+const findByEmail = async (email, includePassword = false) => {
   const result = await db.query(
-    'SELECT u.*, us.active_courses, us.completed_courses, us.avg_score FROM users u ' +
-    'LEFT JOIN user_stats us ON u.id = us.user_id ' +
-    'WHERE u.email = $1',
+    'SELECT * FROM users WHERE email = $1',
     [email]
   );
-  
+
   if (result.rows.length === 0) {
     return null;
   }
 
-  // ВАЖНО: Возвращаем полный объект включая password для внутреннего использования
-  // Не форматируем данные здесь, чтобы сохранить password
-  return result.rows[0];
+  const user = result.rows[0];
+
+  if (includePassword) {
+    return user; // Return raw user data including password for login comparison
+  }
+
+  const stats = await calculateUserStats(user.id);
+  return formatUserDataWithStats(user, stats);
 };
 
 /**
@@ -30,18 +89,16 @@ const findByEmail = async (email) => {
  */
 const findById = async (id) => {
   const result = await db.query(
-    'SELECT u.*, us.active_courses, us.completed_courses, us.avg_score FROM users u ' +
-    'LEFT JOIN user_stats us ON u.id = us.user_id ' +
-    'WHERE u.id = $1',
+    'SELECT * FROM users WHERE id = $1',
     [id]
   );
-  
+
   if (result.rows.length === 0) {
     return null;
   }
-
-  // Здесь форматируем данные, т.к. этот метод используется для API ответов
-  return formatUserData(result.rows[0]);
+  const user = result.rows[0];
+  const stats = await calculateUserStats(user.id);
+  return formatUserDataWithStats(user, stats);
 };
 
 /**
@@ -52,38 +109,14 @@ const findById = async (id) => {
 const create = async (userData) => {
   const { email, password, fullName = null } = userData;
   const hashedPassword = await bcrypt.hash(password, 10);
-  
-  // Транзакция для создания пользователя и его статистики
-  const client = await db.pool.connect();
-  
-  try {
-    await client.query('BEGIN');
-    
-    // Создаем пользователя
-    const userResult = await client.query(
-      'INSERT INTO users (email, password, full_name) VALUES ($1, $2, $3) RETURNING *',
-      [email, hashedPassword, fullName]
-    );
-    
-    const user = userResult.rows[0];
-    
-    // Создаем запись статистики
-    await client.query(
-      'INSERT INTO user_stats (user_id, active_courses, completed_courses, avg_score) VALUES ($1, $2, $3, $4)',
-      [user.id, 0, 0, 0]
-    );
-    
-    await client.query('COMMIT');
-    
-    // Получаем полную информацию о пользователе
-    const fullUser = await findById(user.id);
-    return fullUser;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+
+  // No transaction needed here as user_stats table is removed
+  const userResult = await db.query(
+    'INSERT INTO users (email, password, full_name) VALUES ($1, $2, $3) RETURNING id',
+    [email, hashedPassword, fullName]
+  );
+  const userId = userResult.rows[0].id;
+  return findById(userId); // Fetch with calculated stats
 };
 
 /**
@@ -97,52 +130,31 @@ const update = async (id, updateData) => {
   const updateFields = [];
   const values = [];
   let counter = 1;
-  
+
   if (fullName !== undefined) {
     updateFields.push(`full_name = $${counter}`);
     values.push(fullName);
     counter++;
   }
-  
+
   if (avatarUrl !== undefined) {
     updateFields.push(`avatar_url = $${counter}`);
     values.push(avatarUrl);
     counter++;
   }
-  
+
   if (updateFields.length === 0) {
-    return await findById(id);
+    return findById(id); // No changes, just return current data
   }
-  
-  values.push(id);
-  
-  const result = await db.query(
-    `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${counter} RETURNING *`,
+
+  values.push(id); // For WHERE id = $counter
+
+  await db.query(
+    `UPDATE users SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${counter} RETURNING id`,
     values
   );
-  
-  return await findById(id);
-};
 
-/**
- * Форматирование данных пользователя для API
- * @param {Object} userData - Данные пользователя из базы
- * @returns {Object} - Форматированные данные пользователя
- */
-const formatUserData = (userData) => {
-  const { password, ...userWithoutPassword } = userData;
-  
-  return {
-    id: userData.id,
-    email: userData.email,
-    fullName: userData.full_name,
-    avatarUrl: userData.avatar_url,
-    stats: {
-      activeCourses: userData.active_courses || 0,
-      completedCourses: userData.completed_courses || 0,
-      avgScore: userData.avg_score || 0
-    }
-  };
+  return findById(id); // Fetch updated user with stats
 };
 
 /**
@@ -152,23 +164,12 @@ const formatUserData = (userData) => {
  * @returns {Promise<boolean>} - Результат проверки
  */
 const comparePassword = async (password, hashedPassword) => {
-  return await bcrypt.compare(password, hashedPassword);
+  return bcrypt.compare(password, hashedPassword);
 };
 
-/**
- * Обновление аватара пользователя
- * @param {string} id - ID пользователя
- * @param {string} avatarUrl - URL аватара
- * @returns {Promise<Object>} - Обновленный пользователь
- */
-const updateAvatar = async (id, avatarUrl) => {
-  await db.query(
-    'UPDATE users SET avatar_url = $1 WHERE id = $2',
-    [avatarUrl, id]
-  );
-  
-  return await findById(id);
-};
+// updateAvatar is effectively handled by the general update method if avatarUrl is passed.
+// If a direct method is preferred, it can be kept, but it's redundant.
+// For now, I'll remove the specific updateAvatar as `update` covers it.
 
 module.exports = {
   findByEmail,
@@ -176,6 +177,5 @@ module.exports = {
   create,
   update,
   comparePassword,
-  updateAvatar,
-  formatUserData // Экспортируем для использования в контроллере
+  // formatUserDataWithStats // Not typically exposed, used internally
 };

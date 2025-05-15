@@ -1,206 +1,135 @@
+// ==== File: frontend/src/api/coursesApi.ts ====
 import client from './client';
-import type { Course, CourseCreatePayload } from '../types/Course'; // Добавили CourseCreatePayload
-import type { CourseFilters } from '../hooks/useCourses';
+import type { Course, CourseCreatePayload, CourseFacadePayload } from '../types/Course';
+import { getDifficultyFromTags, getLanguageFromTags } from '../types/Course';
 
-// Изменить на false для использования настоящего API
-const USE_MOCK_DATA = false; 
+const USE_MOCK_DATA = false;
 
-interface CourseParams {
+interface ApiCourseParams {
   search?: string;
-  sort?: 'popularity' | 'difficulty' | 'duration';
+  sort?: 'popularity' | 'difficulty_order' | 'duration';
+  difficulty?: 'Beginner' | 'Middle' | 'Senior';
+  language?: string;
+  tags?: string;
+}
+
+// Function to map API course to frontend Course object
+// EXPORT THIS FUNCTION
+export const mapApiCourseToFrontendCourse = (apiCourse: any): Course => {
+  const tags = apiCourse.tags || [];
+  const difficulty = getDifficultyFromTags(tags);
+  const language = getLanguageFromTags(tags);
+
+  return {
+    id: apiCourse.id,
+    authorId: apiCourse.authorId,
+    authorName: apiCourse.authorName,
+    title: apiCourse.title,
+    description: apiCourse.description,
+    coverUrl: apiCourse.coverUrl || null,
+    estimatedDuration: apiCourse.estimatedDuration || null,
+    version: apiCourse.version,
+    isPublished: apiCourse.isPublished,
+    tags: tags,
+    difficulty: difficulty,
+    language: language,
+    stats: {
+      enrollments: apiCourse.stats?.enrollments || 0,
+      avgCompletion: apiCourse.stats?.avgCompletion || 0,
+      avgRating: apiCourse.stats?.avgRating || 0,
+    },
+    // lessons structure depends on whether it's a list view or detail view
+    // For simplicity, the API might return summaries for lists and full for details.
+    // This mapping function might need to be adapted or have variants if lesson structure varies.
+    lessons: apiCourse.lessons || [],
+    createdAt: apiCourse.createdAt,
+    updatedAt: apiCourse.updatedAt,
+  };
+};
+
+
+export async function getCourses(params?: {
+  search?: string;
+  sort?: string;
   level?: 'Beginner' | 'Middle' | 'Senior';
   language?: string;
   tags?: string[];
-}
-
-export async function getCourses(params?: CourseParams): Promise<Course[]> {
+}): Promise<Course[]> {
   if (USE_MOCK_DATA) {
-    // Здесь оставим мок-реализацию для возможности разработки без бэкенда
-    const { mockCourses } = await import('./mockData');
-    
-    return new Promise((resolve) => {
-      // Simulate network delay
-      setTimeout(() => {
-        let filteredCourses = [...mockCourses];
-        
-        // Apply filters
-        if (params?.search) {
-          const searchLower = params.search.toLowerCase();
-          filteredCourses = filteredCourses.filter(
-            course => 
-              course.title.toLowerCase().includes(searchLower) || 
-              course.authorName.toLowerCase().includes(searchLower) ||
-              (course.tags && course.tags.some(tag => tag.toLowerCase().includes(searchLower)))
-          );
-        }
-        
-        if (params?.level) {
-          filteredCourses = filteredCourses.filter(
-            course => course.difficulty === params.level
-          );
-        }
-        
-        if (params?.language) {
-          filteredCourses = filteredCourses.filter(
-            course => course.language === params.language
-          );
-        }
-        
-        // Apply sorting
-        if (params?.sort) {
-          switch (params.sort) {
-            case 'popularity':
-              filteredCourses = filteredCourses.sort(
-                (a, b) => b.stats.enrollments - a.stats.enrollments
-              );
-              break;
-            case 'difficulty':
-              // Sort by difficulty level (Beginner → Middle → Senior)
-              const difficultyOrder = { 'Beginner': 1, 'Middle': 2, 'Senior': 3 } as const;
-              filteredCourses = filteredCourses.sort(
-                (a, b) => difficultyOrder[a.difficulty as keyof typeof difficultyOrder] - difficultyOrder[b.difficulty as keyof typeof difficultyOrder]
-              );
-              break;
-            case 'duration':
-              filteredCourses = filteredCourses.sort(
-                (a, b) => (b.estimatedDuration || 0) - (a.estimatedDuration || 0)
-              );
-              break;
-          }
-        }
-        
-        resolve(filteredCourses);
-      }, 600); // Simulate a short delay
-    });
-  } else {
-    // Real API call
-    const apiParams: Record<string, string | string[] | undefined> = {};
-    
-    // Map frontend params to API params
-    if (params?.search) apiParams.search = params.search;
-    if (params?.sort) apiParams.sort = params.sort;
-    if (params?.level) apiParams.difficulty = params.level;
-    if (params?.language) apiParams.language = params.language;
-    if (params?.tags && params.tags.length > 0) {
-      apiParams.tags = params.tags.join(',');
-    }
-    
-    const response = await client.get<Course[]>('/courses', { params: apiParams });
-    return response.data;
+    console.warn("Mock data for getCourses needs an update for the new Course structure.");
+    return [];
   }
+
+  const apiParams: ApiCourseParams = {};
+  if (params?.search) apiParams.search = params.search;
+  if (params?.sort) apiParams.sort = params.sort as ApiCourseParams['sort'];
+
+  const filterTags = [...(params?.tags || [])];
+  if (params?.level) filterTags.push(params.level);
+  if (params?.language) filterTags.push(params.language);
+
+  if (filterTags.length > 0) {
+    apiParams.tags = filterTags.join(',');
+  }
+
+  const response = await client.get<any[]>('/courses', { params: apiParams });
+  return response.data.map(mapApiCourseToFrontendCourse); // Uses the exported function
 }
 
-export async function getCourseById(id: string): Promise<Course> {
+export async function getCourseById(id: string, version?: number): Promise<Course> {
   if (USE_MOCK_DATA) {
-    const { mockCourses } = await import('./mockData');
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        const course = mockCourses.find(c => c.id === id);
-        if (course) {
-          resolve(course);
-        } else {
-          reject(new Error('Course not found'));
-        }
-      }, 300);
-    });
-  } else {
-    const response = await client.get<Course>(`/courses/${id}`);
-    return response.data;
+    console.warn("Mock data for getCourseById needs an update.");
+    throw new Error("Mock course not found");
   }
+  const apiParams: { version?: number } = {};
+  if (version) apiParams.version = version;
+
+  const response = await client.get<any>(`/courses/${id}`, { params: apiParams });
+  return mapApiCourseToFrontendCourse(response.data); // Uses the exported function
 }
 
-// Функция для загрузки обложки курса (если используется отдельный эндпоинт)
-// Если бэкенд принимает файл вместе с остальными данными курса, эта функция может не понадобиться.
-// Предположим, что нам нужен URL обложки для CourseCreatePayload.
-// Эту функцию можно вызвать перед createNewCourse, если обложка загружается отдельно.
 export async function uploadCourseCover(formData: FormData): Promise<{ coverUrl: string }> {
-  // Примерный URL, его нужно будет создать на бэкенде (например, /courses/upload-cover)
-  // Этот эндпоинт должен сохранять файл и возвращать его URL.
-  // Пока такого эндпоинта нет, это просто заглушка.
-  // В реальности, бэкэнд `Course.create` ожидает `coverUrl` в `courseData`.
-  // Возможно, будет проще, если `User.uploadAvatar` будет более общим `uploadImage`
-  // или если будет специальный эндпоинт для загрузки обложек курсов.
-  // Пока сделаем заглушку, предполагая, что URL будет получен как-то.
-  console.warn("uploadCourseCover is a placeholder. Implement actual image upload to get coverUrl.");
-  // const response = await client.post<{ coverUrl: string }>('/files/upload-image', formData, { // Примерный URL
-  //   headers: { 'Content-Type': 'multipart/form-data' }
-  // });
-  // return response.data;
-  return new Promise(resolve => setTimeout(() => resolve({ coverUrl: `/uploads/course_covers_placeholder/${Date.now()}.png`}), 500));
-}
-
-
-// Обновленная функция для создания курса
-export async function createNewCourse(payload: CourseCreatePayload): Promise<Course> {
-  if (USE_MOCK_DATA) {
-    const { mockCourses } = await import('./mockData');
-    const newMockCourse: Course = {
-      id: `mock-${Date.now()}`,
-      authorName: 'Текущий Пользователь', // Заменить на данные из useAuth
-      title: payload.title,
-      description: payload.description,
-      difficulty: payload.difficulty,
-      language: payload.language,
-      tags: payload.tags,
-      coverUrl: payload.coverUrl || '/images/courses/default-cover.png',
-      estimatedDuration: 20, // Пример
-      stats: { enrollments: 0, avgCompletion: 0, avgScore: 0 },
-      lessons: [],
-      isPublished: false,
-      version: 1,
-    };
-    mockCourses.push(newMockCourse);
-    return new Promise(resolve => setTimeout(() => resolve(newMockCourse), 500));
-  } else {
-    // Убедимся, что все обязательные для бэкенда поля переданы
-    const apiPayload = {
-        title: payload.title,
-        description: payload.description,
-        difficulty: payload.difficulty,
-        language: payload.language,
-        tags: payload.tags, // Должен быть массив строк
-        coverUrl: payload.coverUrl, // URL обложки
-        // estimatedDuration: payload.estimatedDuration, // Можно добавить позже
-        // lessons: [], // На первом этапе не передаем
-    };
-    const response = await client.post<Course>('/courses', apiPayload);
-    return response.data;
-  }
-}
-
-
-export async function enrollCourse(courseId: string) {
-  if (USE_MOCK_DATA) {
-    return new Promise(resolve => {
-      setTimeout(() => {
-        resolve({ success: true, courseId });
-      }, 500);
+  try {
+    const response = await client.post<{ avatarUrl: string }>('/users/me/avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
     });
-  } else {
-    const response = await client.post(`/courses/${courseId}/enroll`);
-    return response.data;
+    return { coverUrl: response.data.avatarUrl };
+  } catch (error) {
+    console.error("Error uploading course cover:", error);
+    throw error;
   }
 }
 
-export async function rateCourse(courseId: string, value: number) {
-  if (USE_MOCK_DATA) {
-    return new Promise(resolve => {
-      setTimeout(() => {
-        resolve({ success: true, courseId, value });
-      }, 500);
-    });
-  } else {
-    const response = await client.post(`/courses/${courseId}/rating`, { value });
-    return response.data;
+export async function createCourseFacade(payload: CourseFacadePayload): Promise<Course> {
+   if (USE_MOCK_DATA) {
+    throw new Error("Mock for createCourseFacade not implemented");
   }
+  const apiPayload: CourseCreatePayload = {
+      ...payload,
+  };
+  const response = await client.post<any>('/courses', apiPayload);
+  return mapApiCourseToFrontendCourse(response.data); // Uses the exported function
+}
+
+export async function enrollCourse(courseId: string): Promise<any> {
+  if (USE_MOCK_DATA) { return Promise.resolve({success: true}); }
+  const response = await client.post(`/courses/${courseId}/enroll`);
+  return response.data;
+}
+
+export async function rateCourse(courseId: string, value: number, comment?: string): Promise<any> {
+  if (USE_MOCK_DATA) { return Promise.resolve({success: true}); }
+  const response = await client.post(`/courses/${courseId}/rating`, { value, comment });
+  return response.data;
 }
 
 export async function getAvailableTags(): Promise<string[]> {
+  if (USE_MOCK_DATA) return ['MockTag1', 'MockTag2', 'Beginner', 'Python'];
   try {
     const response = await client.get<string[]>('/courses/tags');
     return response.data;
   } catch (error) {
     console.error('Error fetching available tags:', error);
-    throw error;
+    return ['ErrorFetching', 'FallbackTag'];
   }
 }

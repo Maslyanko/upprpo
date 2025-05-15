@@ -1,5 +1,6 @@
+// ==== File: frontend/src/components/Layout.tsx ====
 import React from 'react';
-import Navbar from './Navbar';
+import Navbar from './Navbar'; // Check path
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -7,10 +8,10 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
-    <div className="min-h-screen flex flex-col"> {/* Removed bg-gray-50 */}
+    <div className="min-h-screen flex flex-col bg-gray-50"> {/* Added a light bg for contrast */}
       <Navbar />
-      {/* pt-16 is h-16 for navbar height */}
-      <main className="flex-grow w-full pt-16"> 
+      {/* pt-16 is h-16 (4rem) for navbar height. Ensure Navbar has fixed height or Layout accounts for it. */}
+      <main className="flex-grow w-full pt-16">
         {children}
       </main>
       <footer className="bg-white border-t border-gray-200 py-6 mt-auto">

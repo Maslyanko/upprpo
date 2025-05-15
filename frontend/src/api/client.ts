@@ -1,56 +1,51 @@
+// ==== File: frontend/src/api/client.ts ====
 import axios from 'axios';
 
-// Create API client with correct base URL
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/v1', // Make sure this matches your backend
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/v1',
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Add request interceptor to include auth token
 client.interceptors.request.use(config => {
-  // Get token from localStorage
   const token = localStorage.getItem('token');
-
   if (token) {
-    // Set Authorization header for every request if token exists
     config.headers['Authorization'] = `Bearer ${token}`;
-    console.log('Request with token:', config.url);
-  } else {
-    console.log('Request without token:', config.url);
   }
-
+  // console.log('API Request:', config.method?.toUpperCase(), config.url, config.params || '', config.data || ''); // DEBUG: Log requests
   return config;
 }, error => {
   console.error('Request error:', error);
   return Promise.reject(error);
 });
 
-// Add response interceptor for error handling
 client.interceptors.response.use(
   response => {
-    console.log('Response success:', response.config.url);
+    // console.log('API Response Success:', response.config.url, response.status); // DEBUG: Log success
     return response;
   },
   error => {
-    console.error('Response error:', error.config?.url, error.response?.status, error.message);
+    // console.error('API Response Error:', error.config?.url, error.response?.status, error.message, error.response?.data); // DEBUG: Log full error
 
-    // Handle authentication errors
     if (error.response?.status === 401) {
-      // Only redirect if it's not a login attempt that failed
-      // and also not a /users/me call right after a failed login without token
-      const requestUrl = error.config.url || '';
-      if (!requestUrl.endsWith('/auth/login') && !requestUrl.endsWith('/users/me')) {
-        console.log('Authentication error (not login/initial me) - clearing credentials');
+      const requestUrl = error.config?.url || '';
+      // Avoid clearing credentials and redirecting for login/register failures,
+      // or for the initial /users/me call if it fails (useAuth will handle that).
+      if (
+        !requestUrl.endsWith('/auth/login') &&
+        !requestUrl.endsWith('/auth/register') &&
+        !(requestUrl.endsWith('/users/me') && !localStorage.getItem('user')) // Don't clear if /me fails & no user was stored yet (initial load scenario)
+      ) {
+        console.warn(`401 Unauthorized on ${requestUrl}. Clearing token and user.`);
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-        window.location.href = '/'; // Redirect to home page
+        // Only redirect if not already on the homepage to avoid loop if homepage itself causes 401
+        if (window.location.pathname !== '/') {
+          window.location.href = '/'; // Redirect to home page for re-authentication
+        }
       } else {
-        console.log(`Auth-related request to ${requestUrl} failed with 401. Error will be handled by the caller.`);
-        // For login failure or initial /users/me failure, we don't redirect here.
-        // The calling component (e.g., AuthModal or useAuth) should handle this.
+        // console.log(`Auth-related request to ${requestUrl} failed with 401. Error will be handled by the caller.`);
       }
     }
-    
     return Promise.reject(error);
   }
 );

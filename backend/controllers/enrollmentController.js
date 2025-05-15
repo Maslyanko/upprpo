@@ -1,3 +1,4 @@
+// ==== File: backend/controllers/enrollmentController.js ====
 const Enrollment = require('../models/Enrollment');
 
 /**
@@ -8,31 +9,17 @@ const enrollCourse = async (req, res) => {
   try {
     const { courseId } = req.params;
     const userId = req.user.id;
-    
-    try {
-      const enrollment = await Enrollment.enrollCourse(userId, courseId);
-      res.status(201).json(enrollment);
-    } catch (error) {
-      if (error.message === 'Already enrolled') {
-        return res.status(409).json({
-          code: 'ALREADY_ENROLLED',
-          message: 'Вы уже записаны на этот курс'
-        });
-      } else if (error.message === 'Course not found or not published') {
-        return res.status(404).json({
-          code: 'COURSE_NOT_FOUND',
-          message: 'Курс не найден или не опубликован'
-        });
-      } else {
-        throw error;
-      }
-    }
+
+    const enrollment = await Enrollment.enrollCourse(userId, courseId);
+    res.status(201).json(enrollment);
   } catch (error) {
     console.error('Enroll course error:', error);
-    res.status(500).json({
-      code: 'SERVER_ERROR',
-      message: 'Ошибка при записи на курс'
-    });
+    if (error.message === 'Already enrolled') {
+      return res.status(409).json({ code: 'ALREADY_ENROLLED', message: 'Вы уже записаны на этот курс' });
+    } else if (error.message === 'Course not found or not published') {
+      return res.status(404).json({ code: 'COURSE_NOT_FOUND', message: 'Курс не найден или не опубликован' });
+    }
+    res.status(500).json({ code: 'SERVER_ERROR', message: 'Ошибка при записи на курс' });
   }
 };
 
@@ -44,23 +31,15 @@ const getProgress = async (req, res) => {
   try {
     const { courseId } = req.params;
     const userId = req.user.id;
-    
+
     const progress = await Enrollment.getProgress(userId, courseId);
-    
     if (!progress) {
-      return res.status(404).json({
-        code: 'ENROLLMENT_NOT_FOUND',
-        message: 'Вы не записаны на этот курс'
-      });
+      return res.status(404).json({ code: 'ENROLLMENT_NOT_FOUND', message: 'Вы не записаны на этот курс' });
     }
-    
     res.status(200).json(progress);
   } catch (error) {
     console.error('Get progress error:', error);
-    res.status(500).json({
-      code: 'SERVER_ERROR',
-      message: 'Ошибка при получении прогресса'
-    });
+    res.status(500).json({ code: 'SERVER_ERROR', message: 'Ошибка при получении прогресса' });
   }
 };
 
@@ -71,40 +50,23 @@ const getProgress = async (req, res) => {
 const rateCourse = async (req, res) => {
   try {
     const { courseId } = req.params;
-    const { value } = req.body;
+    const { value, comment } = req.body; // Added comment
     const userId = req.user.id;
-    
+
     if (!value || value < 1 || value > 5) {
-      return res.status(400).json({
-        code: 'INVALID_RATING',
-        message: 'Оценка должна быть от 1 до 5'
-      });
+      return res.status(400).json({ code: 'INVALID_RATING', message: 'Оценка должна быть от 1 до 5' });
     }
-    
-    try {
-      const rating = await Enrollment.rateCourse(userId, courseId, value);
-      res.status(201).json(rating);
-    } catch (error) {
-      if (error.message === 'Not enrolled in the course') {
-        return res.status(403).json({
-          code: 'NOT_ENROLLED',
-          message: 'Вы не записаны на этот курс'
-        });
-      } else if (error.message === 'Already rated') {
-        return res.status(409).json({
-          code: 'ALREADY_RATED',
-          message: 'Вы уже оценили этот курс'
-        });
-      } else {
-        throw error;
-      }
-    }
+
+    const rating = await Enrollment.rateCourse(userId, courseId, value, comment);
+    res.status(201).json(rating);
   } catch (error) {
     console.error('Rate course error:', error);
-    res.status(500).json({
-      code: 'SERVER_ERROR',
-      message: 'Ошибка при оценке курса'
-    });
+    if (error.message === 'Not enrolled in the course') {
+      return res.status(403).json({ code: 'NOT_ENROLLED', message: 'Вы не записаны на этот курс' });
+    }
+    // Removed 'Already rated' as a distinct error, since rateCourse now does an UPSERT.
+    // If you want to prevent updates and only allow initial rating, the model logic would need to change.
+    res.status(500).json({ code: 'SERVER_ERROR', message: 'Ошибка при оценке курса' });
   }
 };
 
