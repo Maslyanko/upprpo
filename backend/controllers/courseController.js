@@ -1,6 +1,7 @@
 // ==== File: backend/controllers/courseController.js ====
 const Course = require('../models/Course');
 const Tag = require('../models/Tag'); // For fetching all tags
+const db = require('../config/db'); // Import db for direct use if not passing client
 
 /**
  * Get all courses with filtering
@@ -9,18 +10,19 @@ const Tag = require('../models/Tag'); // For fetching all tags
 const getCourses = async (req, res) => {
   try {
     const { search, difficulty, sort, tags, language } = req.query;
+    const userId = req.user ? req.user.id : null;
 
     const tagsArray = tags ? (Array.isArray(tags) ? tags : tags.split(',')) : [];
 
     const filters = {
       search,
-      difficulty, // This will be treated as a tag
+      difficulty, 
       sort,
       tags: tagsArray,
-      language, // This will also be treated as a tag
+      language, 
     };
 
-    const courses = await Course.findAll(filters);
+    const courses = await Course.findAll(filters, userId);
     res.status(200).json(courses);
   } catch (error) {
     console.error('Get courses error:', error);
@@ -39,8 +41,10 @@ const getCourseById = async (req, res) => {
   try {
     const { courseId } = req.params;
     const { version } = req.query;
+    const userId = req.user ? req.user.id : null;
 
-    const course = await Course.findById(courseId, version ? parseInt(version) : null);
+    // Call Course.findById with userIdForProgress, dbClient will default in model
+    const course = await Course.findById(courseId, version ? parseInt(version) : null, userId);
 
     if (!course) {
       return res.status(404).json({
@@ -64,10 +68,9 @@ const getCourseById = async (req, res) => {
  */
 const createCourse = async (req, res) => {
   try {
-    const courseData = req.body; // Expects title, description, tags (incl. difficulty, lang), lessonsData
+    const courseData = req.body; 
     const authorId = req.user.id;
 
-    // Validate that difficulty is provided as a tag
     const difficultyTag = courseData.tags?.find(tag => ['Beginner', 'Middle', 'Senior'].includes(tag));
     if (!difficultyTag) {
         return res.status(400).json({
@@ -75,8 +78,10 @@ const createCourse = async (req, res) => {
             message: 'Необходимо указать тег сложности (Beginner, Middle, или Senior).'
         });
     }
-
-    const newCourse = await Course.create(courseData, authorId);
+    const newCourse = await Course.create({
+        ...courseData,
+        lessonsData: courseData.lessonsData || courseData.lessons || [] 
+    }, authorId);
     res.status(201).json(newCourse);
   } catch (error) {
     console.error('Create course error:', error);
@@ -100,24 +105,21 @@ const updateCourse = async (req, res) => {
     const updateData = req.body;
     const authorId = req.user.id;
 
-    // If tags are updated, ensure difficulty is still present or correctly handled
     if (updateData.tags) {
         const difficultyTag = updateData.tags.find(tag => ['Beginner', 'Middle', 'Senior'].includes(tag));
-        if (!difficultyTag) {
-             // If difficulty is not in the update, the existing one will persist.
-             // If they *remove* difficulty, it's an issue. This validation might be better in the model.
-        }
+        // Validation for difficulty can be added here if needed
     }
 
     const updatedCourse = await Course.update(courseId, updateData, authorId);
     res.status(200).json(updatedCourse);
-  } catch (error)
- {
+  } catch (error) {
     console.error('Update course error:', error);
     if (error.message === 'Course not found or not authorized') {
       return res.status(403).json({ code: 'FORBIDDEN', message: 'Вы не являетесь автором этого курса или курс не найден' });
-    } else if (error.message === 'Cannot update published course. Create a new version.') {
-      return res.status(403).json({ code: 'ALREADY_PUBLISHED', message: 'Нельзя редактировать опубликованный курс. Создайте новую версию.' });
+    } else if (error.message === 'Not authorized to update this course') {
+        return res.status(403).json({ code: 'FORBIDDEN', message: 'Вы не являетесь автором этого курса.' });
+    } else if (error.message === 'Cannot update published course facade. Create a new version or unpublish first.') {
+        return res.status(403).json({ code: 'ALREADY_PUBLISHED_FACADE_CHANGE', message: 'Нельзя изменять общую информацию опубликованного курса. Для изменения контента (уроков) версия обновится автоматически.' });
     }
     res.status(500).json({ code: 'SERVER_ERROR', message: 'Ошибка при обновлении курса' });
   }
@@ -148,9 +150,8 @@ const publishCourse = async (req, res) => {
  */
 const getAllTags = async (req, res) => {
   try {
-    // Fetches tag *names* associated with published courses
     const tagNames = await Tag.getUniqueCourseTagNames();
-    res.status(200).json(tagNames); // Send as a simple array of strings
+    res.status(200).json(tagNames); 
   } catch (error) {
     console.error('Get all tags error:', error);
     res.status(500).json({
@@ -169,11 +170,8 @@ const deleteCourse = async (req, res) => {
   try {
     const { courseId } = req.params;
     const authorId = req.user.id;
-
-    // The Course.delete method should handle author check and actual deletion
     await Course.deleteById(courseId, authorId); 
-    
-    res.status(204).send(); // No content, successful deletion
+    res.status(204).send();
   } catch (error) {
     console.error('Delete course error:', error);
     if (error.message === 'Course not found or not authorized') {

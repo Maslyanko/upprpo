@@ -1,3 +1,4 @@
+// ==== File: backend/routes/courseRoutes.js ====
 const express = require('express');
 const router = express.Router();
 const { 
@@ -12,78 +13,88 @@ const {
 const { 
   enrollCourse, 
   getProgress, 
-  rateCourse 
+  rateCourse,
+  completeLesson
 } = require('../controllers/enrollmentController');
-const { protect, authorOnly } = require('../middleware/auth');
+const { submitUserAnswer } = require('../controllers/answerController'); // NEW
+const { protect } = require('../middleware/auth');
+
+// ... existing course routes ...
 
 /**
  * @route GET /courses
  * @desc Get all courses with filtering
- * @access Public/Private
  */
-router.get('/', getCourses);
+router.get('/', getCourses); 
 
 /**
  * @route GET /courses/tags
  * @desc Get all unique course tags
- * @access Public
  */
-router.get('/tags', getAllTags); // <-- ADDED ROUTE
+router.get('/tags', getAllTags);
 
 /**
  * @route POST /courses
  * @desc Create a new course
- * @access Private
  */
 router.post('/', protect, createCourse);
 
 /**
  * @route GET /courses/:courseId
- * @desc Get single course by ID
- * @access Public
+ * @desc Get single course by ID.
  */
-router.get('/:courseId', getCourseById);
+router.get('/:courseId', protect, getCourseById); 
 
 /**
  * @route PUT /courses/:courseId
  * @desc Update a course
- * @access Private (Author only)
  */
 router.put('/:courseId', protect, updateCourse);
 
 /**
  * @route POST /courses/:courseId/publish
  * @desc Publish a course
- * @access Private (Author only)
  */
 router.post('/:courseId/publish', protect, publishCourse);
 
 /**
  * @route POST /courses/:courseId/enroll
  * @desc Enroll in a course
- * @access Private
  */
 router.post('/:courseId/enroll', protect, enrollCourse);
 
 /**
  * @route GET /courses/:courseId/progress
- * @desc Get enrollment progress
- * @access Private
+ * @desc Get enrollment progress (overall for the course)
  */
 router.get('/:courseId/progress', protect, getProgress);
 
 /**
  * @route POST /courses/:courseId/rating
  * @desc Rate a course
- * @access Private
  */
 router.post('/:courseId/rating', protect, rateCourse);
 
 /**
  * @route DELETE /courses/:courseId
  * @desc Delete a course
- * @access Private (Author only)
  */
 router.delete('/:courseId', protect, deleteCourse);
+
+/**
+ * @route POST /lessons/:lessonId/complete
+ * @desc Mark a lesson as complete for the logged-in user
+ */
+router.post('/lessons/:lessonId/complete', protect, completeLesson);
+
+
+// --- New route for submitting answers ---
+/**
+ * @route POST /answers/questions/:questionId/submit
+ * @desc Submit an answer for a specific question
+ * @access Private (Protected by `protect` middleware)
+ */
+router.post('/answers/questions/:questionId/submit', protect, submitUserAnswer);
+
 
 module.exports = router;

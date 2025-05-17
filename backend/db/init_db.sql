@@ -1,3 +1,5 @@
+--- START OF FILE init_db.txt ---
+
 -- ===================================================================
 -- 1. Создание базы данных и подключение
 -- ===================================================================
@@ -91,7 +93,7 @@ CREATE TABLE IF NOT EXISTS questions (
   page_id UUID NOT NULL REFERENCES lesson_pages(id) ON DELETE CASCADE, -- Changed from lesson_id
   text TEXT NOT NULL,
   type VARCHAR(50) NOT NULL, -- 'SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TEXT_INPUT', 'CODE_INPUT'
-  correct_answer TEXT, -- NEW: For TEXT_INPUT and CODE_INPUT
+  correct_answer TEXT, -- NEW: For TEXT_INPUT and CODE_INPUT (can be a pattern or exact string)
   sort_order INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- Add this if you want an updated_at trigger for questions
@@ -110,7 +112,7 @@ CREATE TABLE IF NOT EXISTS enrollments (
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   course_id UUID REFERENCES courses(id) ON DELETE CASCADE,
   status VARCHAR(50) NOT NULL DEFAULT 'inProgress', -- 'inProgress', 'completed'
-  progress DECIMAL(5,2) NOT NULL DEFAULT 0,
+  progress DECIMAL(5,2) NOT NULL DEFAULT 0, -- Overall course progress
   started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   finished_at TIMESTAMP,
   PRIMARY KEY (user_id, course_id)
@@ -128,12 +130,30 @@ CREATE TABLE IF NOT EXISTS ratings (
 
 CREATE TABLE IF NOT EXISTS lesson_progress (
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  lesson_id UUID REFERENCES lessons(id) ON DELETE CASCADE, -- Or page_id if progress is per page
+  lesson_id UUID REFERENCES lessons(id) ON DELETE CASCADE,
   completed BOOLEAN DEFAULT FALSE,
-  score DECIMAL(5,2),
+  score DECIMAL(5,2), -- Score for this lesson, e.g., from quizzes within it
   last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (user_id, lesson_id) -- Or user_id, page_id
+  PRIMARY KEY (user_id, lesson_id)
 );
+
+-- NEW TABLE FOR USER ANSWERS
+CREATE TABLE IF NOT EXISTS user_question_answers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+  -- For SINGLE_CHOICE, this stores an array with the selected option's ID.
+  -- For MULTIPLE_CHOICE, this stores an array of selected option IDs.
+  -- For TEXT_INPUT/CODE_INPUT, this is NULL or empty array.
+  selected_option_ids UUID[],
+  answer_text TEXT,             -- For text/code input questions
+  is_correct BOOLEAN DEFAULT FALSE,
+  submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  -- A user has one answer record per question. Can be updated (e.g. for multiple attempts).
+  UNIQUE (user_id, question_id)
+);
+
 
 -- ===================================================================
 -- 4. Триггеры для автоматического обновления updated_at
@@ -154,8 +174,8 @@ CREATE TRIGGER update_lesson_pages_modtime BEFORE UPDATE ON lesson_pages FOR EAC
 CREATE TRIGGER update_methodical_page_content_modtime BEFORE UPDATE ON methodical_page_content FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 CREATE TRIGGER update_course_stats_modtime BEFORE UPDATE ON course_stats FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 CREATE TRIGGER update_ratings_modtime BEFORE UPDATE ON ratings FOR EACH ROW EXECUTE FUNCTION update_modified_column();
--- Add for questions if you added updated_at to questions table
 CREATE TRIGGER update_questions_modtime BEFORE UPDATE ON questions FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+CREATE TRIGGER update_user_question_answers_modtime BEFORE UPDATE ON user_question_answers FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 
 
 -- ===================================================================
@@ -169,15 +189,13 @@ SELECT
   u.full_name AS author_name,
   c.title,
   c.description,
-  -- c.difficulty, -- Difficulty is now derived from tags
-  -- c.language,   -- Language is now derived from tags
   c.cover_url,
   c.estimated_duration,
   c.version,
   c.is_published,
   cs.enrollments,
   cs.avg_completion,
-  cs.avg_rating, -- Changed from cs.avg_score
+  cs.avg_rating,
   c.created_at,
   c.updated_at
 FROM courses c
@@ -199,3 +217,4 @@ GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO offeruser;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO offeruser;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO offeruser;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO offeruser;
+--- END OF FILE init_db.txt ---

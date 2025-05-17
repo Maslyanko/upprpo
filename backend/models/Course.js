@@ -1,16 +1,17 @@
 // ==== File: backend/models/Course.js ====
 // ==== File: backend/models/Course.js ====
+// ==== File: backend/models/Course.js ====
 const db = require('../config/db');
 const Tag = require('./Tag'); // For tag handling
 
 /**
  * Helper to get course tags by course ID.
  * @param {string} courseId
- * @param {Object} client - Optional DB client for transactions
+ * @param {Object} dbClient - DB client for transactions or default db module
  * @returns {Promise<Array<string>>} Array of tag names
  */
-const getCourseTagNames = async (courseId, client = db) => {
-  const result = await client.query(
+const getCourseTagNames = async (courseId, dbClient = db) => {
+  const result = await dbClient.query(
     'SELECT t.name FROM tags t JOIN course_tags ct ON t.id = ct.tag_id WHERE ct.course_id = $1 ORDER BY t.name',
     [courseId]
   );
@@ -20,11 +21,12 @@ const getCourseTagNames = async (courseId, client = db) => {
 /**
  * Helper to get lesson summaries for a course.
  * @param {string} courseId
- * @param {Object} client - Optional DB client for transactions
+ * @param {Object} dbClient - DB client for transactions or default db module
+ * @param {string | null} userIdForProgress - Optional user ID to fetch their progress
  * @returns {Promise<Array<Object>>}
  */
-const getCourseLessonSummaries = async (courseId, client = db) => {
-  const lessonsResult = await client.query(
+const getCourseLessonSummaries = async (courseId, dbClient = db, userIdForProgress = null) => {
+  const lessonsResult = await dbClient.query(
     `SELECT l.id, l.title, l.sort_order, l.description
      FROM lessons l
      WHERE l.course_id = $1
@@ -34,7 +36,7 @@ const getCourseLessonSummaries = async (courseId, client = db) => {
 
   const lessons = [];
   for (const lessonRow of lessonsResult.rows) {
-    const quizPageCheck = await client.query(
+    const quizPageCheck = await dbClient.query(
       `SELECT EXISTS (
          SELECT 1
          FROM lesson_pages lp
@@ -43,12 +45,25 @@ const getCourseLessonSummaries = async (courseId, client = db) => {
        ) as has_quiz`,
       [lessonRow.id]
     );
+
+    let completedByUser = false;
+    if (userIdForProgress) {
+      const progressCheck = await dbClient.query(
+        'SELECT completed FROM lesson_progress WHERE user_id = $1 AND lesson_id = $2',
+        [userIdForProgress, lessonRow.id]
+      );
+      if (progressCheck.rows.length > 0) {
+        completedByUser = progressCheck.rows[0].completed;
+      }
+    }
+
     lessons.push({
       id: lessonRow.id,
       title: lessonRow.title,
       description: lessonRow.description,
       sort_order: lessonRow.sort_order,
       hasQuiz: quizPageCheck.rows[0].has_quiz,
+      completedByUser: completedByUser,
     });
   }
   return lessons;
@@ -90,7 +105,7 @@ const formatCourseData = (courseRow, tags, lessons) => {
   };
 };
 
-const findAll = async (filters = {}) => {
+const findAll = async (filters = {}, userIdForProgress = null) => {
   const { search, tags: filterTags = [], difficulty, language } = filters;
 
   let query = `
@@ -140,16 +155,17 @@ const findAll = async (filters = {}) => {
   }
   query += ` ORDER BY c.created_at DESC`;
 
-  const result = await db.query(query, queryParams);
+  const result = await db.query(query, queryParams); // Using default db.query for the main fetch
 
   return Promise.all(result.rows.map(async (row) => {
-    const courseTags = await getCourseTagNames(row.id);
-    const lessonSummaries = await getCourseLessonSummaries(row.id);
+    const courseTags = await getCourseTagNames(row.id); // Uses default dbClient
+    const lessonSummaries = await getCourseLessonSummaries(row.id, db, userIdForProgress); // Pass db and userIdForProgress
     return formatCourseData(row, courseTags, lessonSummaries);
   }));
 };
 
-const findById = async (id, version = null, client = db) => {
+// Signature changed: dbClient is now the last optional parameter.
+const findById = async (id, version = null, userIdForProgress = null, dbClient = db) => {
   let queryText = `
     SELECT
       c.id, c.author_id, u.full_name AS author_name, c.title, c.description,
@@ -167,23 +183,24 @@ const findById = async (id, version = null, client = db) => {
   if (version) {
     queryText += ` AND c.version = $2`;
     queryParams.push(version);
+  } else {
+    queryText += ` ORDER BY c.is_published DESC, c.version DESC LIMIT 1`;
   }
-  queryText += ` ORDER BY c.version DESC LIMIT 1`;
 
-  const result = await client.query(queryText, queryParams);
+  const result = await dbClient.query(queryText, queryParams);
   if (result.rows.length === 0) return null;
 
   const courseRow = result.rows[0];
-  const courseTags = await getCourseTagNames(courseRow.id, client);
+  const courseTags = await getCourseTagNames(courseRow.id, dbClient);
 
-  const lessonsResult = await client.query(
+  const lessonsResult = await dbClient.query(
     `SELECT id, title, description, sort_order FROM lessons WHERE course_id = $1 ORDER BY sort_order`,
     [courseRow.id]
   );
 
   const detailedLessons = [];
   for (const lesson of lessonsResult.rows) {
-    const pagesResult = await client.query(
+    const pagesResult = await dbClient.query(
       `SELECT id, title, page_type, sort_order FROM lesson_pages WHERE lesson_id = $1 ORDER BY sort_order`,
       [lesson.id]
     );
@@ -191,17 +208,17 @@ const findById = async (id, version = null, client = db) => {
     for (const page of pagesResult.rows) {
       let pageDetails = { ...page, content: null, questions: [] };
       if (page.page_type === 'METHODICAL') {
-        const contentResult = await client.query('SELECT content FROM methodical_page_content WHERE page_id = $1', [page.id]);
+        const contentResult = await dbClient.query('SELECT content FROM methodical_page_content WHERE page_id = $1', [page.id]);
         if (contentResult.rows.length > 0) {
           pageDetails.content = contentResult.rows[0].content;
         }
       } else if (page.page_type === 'ASSIGNMENT') {
-        const questionsResult = await client.query( // Fetch correct_answer
+        const questionsResult = await dbClient.query(
           'SELECT id, text, type, correct_answer, sort_order FROM questions WHERE page_id = $1 ORDER BY sort_order',
           [page.id]
         );
         for (const question of questionsResult.rows) {
-          const optionsResult = await client.query(
+          const optionsResult = await dbClient.query(
             'SELECT id, label, is_correct, sort_order FROM question_options WHERE question_id = $1 ORDER BY sort_order',
             [question.id]
           );
@@ -210,18 +227,33 @@ const findById = async (id, version = null, client = db) => {
       }
       pages.push(pageDetails);
     }
-    detailedLessons.push({ ...lesson, pages });
+
+    let completedByUser = false;
+    if (userIdForProgress) {
+      const progressCheck = await dbClient.query(
+        'SELECT completed FROM lesson_progress WHERE user_id = $1 AND lesson_id = $2',
+        [userIdForProgress, lesson.id]
+      );
+      if (progressCheck.rows.length > 0) {
+        completedByUser = progressCheck.rows[0].completed;
+      }
+    }
+    detailedLessons.push({ ...lesson, pages, completedByUser });
   }
   return formatCourseData(courseRow, courseTags, detailedLessons);
 };
 
-async function _updateOrInsertLessons(client, courseId, lessonsData) {
-  await client.query('DELETE FROM lessons WHERE course_id = $1', [courseId]);
+async function _updateOrInsertLessons(dbClient, courseId, lessonsData) {
+  await dbClient.query(
+    `DELETE FROM lesson_pages WHERE lesson_id IN (SELECT id FROM lessons WHERE course_id = $1)`,
+    [courseId]
+  );
+  await dbClient.query('DELETE FROM lessons WHERE course_id = $1', [courseId]);
 
   if (lessonsData && Array.isArray(lessonsData)) {
     for (let lessonIdx = 0; lessonIdx < lessonsData.length; lessonIdx++) {
       const lessonInput = lessonsData[lessonIdx];
-      const lessonResult = await client.query(
+      const lessonResult = await dbClient.query(
         `INSERT INTO lessons (course_id, title, description, sort_order)
          VALUES ($1, $2, $3, $4) RETURNING id`,
         [courseId, lessonInput.title, lessonInput.description || null, lessonIdx]
@@ -231,7 +263,7 @@ async function _updateOrInsertLessons(client, courseId, lessonsData) {
       if (Array.isArray(lessonInput.pages)) {
         for (let pageIdx = 0; pageIdx < lessonInput.pages.length; pageIdx++) {
           const pageInput = lessonInput.pages[pageIdx];
-          const pageResult = await client.query(
+          const pageResult = await dbClient.query(
             `INSERT INTO lesson_pages (lesson_id, title, page_type, sort_order)
              VALUES ($1, $2, $3, $4) RETURNING id`,
             [lessonId, pageInput.title, pageInput.page_type, pageIdx]
@@ -239,19 +271,14 @@ async function _updateOrInsertLessons(client, courseId, lessonsData) {
           const pageId = pageResult.rows[0].id;
 
           if (pageInput.page_type === 'METHODICAL' && pageInput.content) {
-            await client.query(
+            await dbClient.query(
               'INSERT INTO methodical_page_content (page_id, content) VALUES ($1, $2)',
               [pageId, pageInput.content]
             );
           } else if (pageInput.page_type === 'ASSIGNMENT' && Array.isArray(pageInput.questions)) {
             for (let questionIdx = 0; questionIdx < pageInput.questions.length; questionIdx++) {
               const qInput = pageInput.questions[questionIdx];
-              console.log(`[COURSE MODEL DEBUG] Inserting Question for page ${pageId}:`);
-              console.log(`  Text: ${qInput.text}`);
-              console.log(`  Type: ${qInput.type}`);
-              console.log(`  Correct Answer (from qInput): '${qInput.correct_answer}' (Type: ${typeof qInput.correct_answer})`);
-              console.log(`  Sort Order: ${questionIdx}`);
-              const questionResult = await client.query( // Insert correct_answer
+              const questionResult = await dbClient.query(
                 `INSERT INTO questions (page_id, text, type, correct_answer, sort_order)
                  VALUES ($1, $2, $3, $4, $5) RETURNING id`,
                 [pageId, qInput.text, qInput.type, qInput.correct_answer || null, questionIdx]
@@ -261,7 +288,7 @@ async function _updateOrInsertLessons(client, courseId, lessonsData) {
               if (Array.isArray(qInput.options)) {
                 for (let optionIdx = 0; optionIdx < qInput.options.length; optionIdx++) {
                   const optInput = qInput.options[optionIdx];
-                  await client.query(
+                  await dbClient.query(
                     `INSERT INTO question_options (question_id, label, is_correct, sort_order)
                      VALUES ($1, $2, $3, $4)`,
                     [questionId, optInput.label, optInput.is_correct || false, optionIdx]
@@ -284,7 +311,7 @@ const create = async (courseData, authorId) => {
     lessonsData = [],
   } = courseData;
 
-  const client = await db.pool.connect();
+  const client = await db.pool.connect(); // Transaction client
   try {
     await client.query('BEGIN');
 
@@ -308,7 +335,8 @@ const create = async (courseData, authorId) => {
     await _updateOrInsertLessons(client, courseId, lessonsData);
 
     await client.query('COMMIT');
-    return findById(courseId, null, client);
+    // Call findById with the transaction client and userIdForProgress=null
+    return findById(courseId, null, null, client);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("Error creating course:", error);
@@ -319,7 +347,7 @@ const create = async (courseData, authorId) => {
 };
 
 const publish = async (courseId, authorId) => {
-  const client = await db.pool.connect();
+  const client = await db.pool.connect(); // Transaction client
   try {
     await client.query('BEGIN');
     const courseCheck = await client.query(
@@ -334,7 +362,8 @@ const publish = async (courseId, authorId) => {
       [courseId]
     );
     await client.query('COMMIT');
-    return findById(courseId, null, client);
+    // Call findById with the transaction client and userIdForProgress=null
+    return findById(courseId, null, null, client);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("Error publishing course:", error);
@@ -344,7 +373,7 @@ const publish = async (courseId, authorId) => {
   }
 };
 
-const findByAuthor = async (authorId) => {
+const findByAuthor = async (authorId, userIdForProgressToPass = null) => {
   const query = `
     SELECT
       c.id, c.author_id, u.full_name AS author_name, c.title, c.description,
@@ -359,21 +388,21 @@ const findByAuthor = async (authorId) => {
     WHERE c.author_id = $1
     ORDER BY c.created_at DESC;
   `;
-  const result = await db.query(query, [authorId]);
+  const result = await db.query(query, [authorId]); // Main query uses default db
   return Promise.all(result.rows.map(async (row) => {
-    const courseTags = await getCourseTagNames(row.id);
-    const lessonSummaries = await getCourseLessonSummaries(row.id);
+    const courseTags = await getCourseTagNames(row.id); // Uses default db
+    const lessonSummaries = await getCourseLessonSummaries(row.id, db, userIdForProgressToPass); // Pass db and the user ID
     return formatCourseData(row, courseTags, lessonSummaries);
   }));
 };
 
 const update = async (courseId, updateData, authorId) => {
-  const client = await db.pool.connect();
+  const client = await db.pool.connect(); // Transaction client
   try {
     await client.query('BEGIN');
 
     const courseCheckResult = await client.query(
-      'SELECT is_published, author_id FROM courses WHERE id = $1',
+      'SELECT is_published, author_id, version FROM courses WHERE id = $1',
       [courseId]
     );
     if (courseCheckResult.rows.length === 0) throw new Error('Course not found');
@@ -381,60 +410,64 @@ const update = async (courseId, updateData, authorId) => {
     const courseInfo = courseCheckResult.rows[0];
     if (courseInfo.author_id !== authorId) throw new Error('Not authorized to update this course');
     
-    // Simplified check: if lessons are part of the payload, assume it's a content update.
-    const isContentUpdate = updateData.lessons !== undefined;
-
-    if (courseInfo.is_published && !isContentUpdate) { 
-         throw new Error('Cannot update published course facade. Create a new version or unpublish first.');
-    }
-
     const { title, description, coverUrl, estimatedDuration, tags, lessons } = updateData;
+    let newVersionRequired = false;
 
-    const courseUpdateFields = [];
-    const courseUpdateValues = [];
-    let courseParamIdx = 1;
-
-    const addField = (field, value) => {
-      if (value !== undefined) {
-        courseUpdateFields.push(`${field} = $${courseParamIdx++}`);
-        courseUpdateValues.push(value);
-      }
-    };
-
-    if (!isContentUpdate) { // Only update these if it's primarily a facade update
-        addField('title', title);
-        addField('description', description);
-        addField('cover_url', coverUrl);
-        addField('estimated_duration', estimatedDuration);
-    }
-
-    if (courseUpdateFields.length > 0) {
-      courseUpdateValues.push(courseId);
-      await client.query(
-        `UPDATE courses SET ${courseUpdateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${courseParamIdx}`,
-        courseUpdateValues
-      );
-    }
-
-    if (tags !== undefined && !isContentUpdate) { 
-      await client.query('DELETE FROM course_tags WHERE course_id = $1', [courseId]);
-      if (Array.isArray(tags) && tags.length > 0) {
-        for (const tagName of tags) {
-          const tag = await Tag.findOrCreate(tagName, client);
-          await client.query('INSERT INTO course_tags (course_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [courseId, tag.id]);
+    if (title !== undefined || description !== undefined || coverUrl !== undefined || estimatedDuration !== undefined || tags !== undefined) {
+      const courseUpdateFields = [];
+      const courseUpdateValues = [];
+      let courseParamIdx = 1;
+      const addField = (field, value) => {
+        if (value !== undefined) {
+          courseUpdateFields.push(`${field} = $${courseParamIdx++}`);
+          courseUpdateValues.push(value);
         }
+      };
+      addField('title', title);
+      addField('description', description);
+      addField('cover_url', coverUrl);
+      addField('estimated_duration', estimatedDuration);
+
+      if (courseUpdateFields.length > 0) {
+        courseUpdateValues.push(courseId);
+        await client.query(
+          `UPDATE courses SET ${courseUpdateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${courseParamIdx}`,
+          courseUpdateValues
+        );
+        if (courseInfo.is_published) newVersionRequired = true;
+      }
+
+      if (tags !== undefined) { 
+        await client.query('DELETE FROM course_tags WHERE course_id = $1', [courseId]);
+        if (Array.isArray(tags) && tags.length > 0) {
+          for (const tagName of tags) {
+            const tag = await Tag.findOrCreate(tagName, client);
+            await client.query('INSERT INTO course_tags (course_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [courseId, tag.id]);
+          }
+        }
+        if (courseInfo.is_published) newVersionRequired = true;
       }
     }
     
-    if (lessons !== undefined && Array.isArray(lessons)) { // Check for lessons specifically
+    if (lessons !== undefined && Array.isArray(lessons)) {
       await _updateOrInsertLessons(client, courseId, lessons);
-      if (courseInfo.is_published) { // If content of a published course changes, bump version
-        await client.query('UPDATE courses SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [courseId]);
+      if (courseInfo.is_published) {
+        newVersionRequired = true;
       }
     }
 
+    if (newVersionRequired && courseInfo.is_published) {
+      await client.query(
+        'UPDATE courses SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1', 
+        [courseId]
+      );
+    } else if (title !== undefined || description !== undefined || coverUrl !== undefined || estimatedDuration !== undefined || tags !== undefined || (lessons !== undefined && Array.isArray(lessons))) {
+      await client.query('UPDATE courses SET updated_at = CURRENT_TIMESTAMP WHERE id = $1', [courseId]);
+    }
+
     await client.query('COMMIT');
-    return findById(courseId, null, client);
+    // Call findById with transaction client, passing authorId as userIdForProgress
+    return findById(courseId, null, authorId, client);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("Error updating course:", error);
@@ -445,11 +478,10 @@ const update = async (courseId, updateData, authorId) => {
 };
 
 const deleteById = async (courseId, authorId) => {
-  const client = await db.pool.connect();
+  const client = await db.pool.connect(); // Transaction client
   try {
     await client.query('BEGIN');
 
-    // Verify author and course existence
     const courseCheck = await client.query(
       'SELECT id FROM courses WHERE id = $1 AND author_id = $2',
       [courseId, authorId]
@@ -457,16 +489,12 @@ const deleteById = async (courseId, authorId) => {
     if (courseCheck.rows.length === 0) {
       throw new Error('Course not found or not authorized');
     }
-
-    // Deletion will cascade due to ON DELETE CASCADE in DB schema
-    // (course_tags, course_stats, lessons -> lesson_pages -> etc., enrollments, ratings)
     await client.query('DELETE FROM courses WHERE id = $1', [courseId]);
-
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("Error deleting course:", error);
-    throw error; // Re-throw to be caught by controller
+    throw error;
   } finally {
     client.release();
   }

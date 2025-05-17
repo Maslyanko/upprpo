@@ -1,5 +1,5 @@
 // ==== File: frontend/src/types/Course.ts ====
-// ==== File: frontend/src/types/Course.ts ====
+// (Только измененная часть)
 import { v4 as uuidv4 } from 'uuid';
 
 export interface MethodicalPageContent {
@@ -18,9 +18,13 @@ export interface Question {
   page_id?: string;
   text: string; // Markdown
   type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TEXT_INPUT' | 'CODE_INPUT';
-  correct_answer?: string | null; // NEW: For TEXT_INPUT and CODE_INPUT
+  correct_answer?: string | null; 
   sort_order: number;
   options: QuestionOption[];
+  userAnswer?: UserAnswerSubmission; 
+  isCorrect?: boolean | null; // null = not answered/checked, true/false after check
+  feedback?: string; 
+  isAttemptAllowed?: boolean; // NEW: true by default, false after correct answer or if logic dictates no more tries.
 }
 
 export interface LessonPage {
@@ -33,15 +37,16 @@ export interface LessonPage {
   questions: Question[];
 }
 
-export interface LessonEditable extends LessonIdentifiable {
-    description?: string | null;
-    pages: LessonPage[];
-}
-
 export interface LessonIdentifiable {
   id: string;
   title: string;
   sort_order: number;
+}
+
+export interface LessonEditable extends LessonIdentifiable {
+    description?: string | null;
+    pages: LessonPage[];
+    completedByUser?: boolean; 
 }
 
 export interface LessonSummary {
@@ -49,8 +54,10 @@ export interface LessonSummary {
   title: string;
   description?: string | null;
   sort_order: number;
-  hasQuiz: boolean;
+  hasQuiz: boolean; 
+  completedByUser?: boolean;
 }
+
 
 export interface CourseStats {
   enrollments: number;
@@ -72,7 +79,7 @@ export interface Course {
   difficulty: 'Beginner' | 'Middle' | 'Senior' | null;
   language: string | null;
   stats: CourseStats;
-  lessons: LessonSummary[] | LessonEditable[];
+  lessons: (LessonEditable[] | LessonSummary[]);
   createdAt?: string;
   updatedAt?: string;
 }
@@ -86,29 +93,29 @@ export interface CourseFacadePayload {
 }
 
 export interface QuestionOptionPayload {
-  id?: string;
+  id?: string; 
   label: string;
   is_correct: boolean;
   sort_order: number;
 }
 export interface QuestionPayload {
-  id?: string;
+  id?: string; 
   text: string;
   type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TEXT_INPUT' | 'CODE_INPUT';
-  correct_answer?: string | null; // NEW
+  correct_answer?: string | null;
   sort_order: number;
   options: QuestionOptionPayload[];
 }
 export interface LessonPagePayload {
-  id?: string;
+  id?: string; 
   title: string;
   page_type: 'METHODICAL' | 'ASSIGNMENT';
   sort_order: number;
-  content: string;
-  questions: QuestionPayload[];
+  content: string; 
+  questions: QuestionPayload[]; 
 }
 export interface LessonPayloadForBackend {
-    id?: string;
+    id?: string; 
     title: string;
     description?: string | null;
     sort_order: number;
@@ -123,8 +130,35 @@ export interface CourseContentUpdatePayload {
   estimatedDuration?: number;
 }
 
+export interface AnswerPayload {
+    questionId: string;
+    selectedOptionIds?: string[]; 
+    answerText?: string;         
+}
+
+export interface AnswerSubmissionResponse {
+    message: string;
+    data: {
+        id: string; 
+        user_id: string;
+        question_id: string;
+        selected_option_ids: string[] | null;
+        answer_text: string | null;
+        is_correct: boolean;
+        submitted_at: string;
+        updated_at: string;
+        lessonId: string;
+        lessonScore: number;
+    };
+}
+
+export interface UserAnswerSubmission {
+    selectedOptionIds?: string[];
+    answerText?: string;
+}
+
 export const getDifficultyFromTags = (tags: string[]): 'Beginner' | 'Middle' | 'Senior' | null => {
-  if (!tags) return null;
+  if (!Array.isArray(tags)) return null;
   if (tags.includes('Beginner')) return 'Beginner';
   if (tags.includes('Middle')) return 'Middle';
   if (tags.includes('Senior')) return 'Senior';
@@ -133,7 +167,7 @@ export const getDifficultyFromTags = (tags: string[]): 'Beginner' | 'Middle' | '
 
 const KNOWN_LANGUAGES = ['Python', 'JavaScript', 'Java', 'SQL', 'Go', 'C++', 'C#', 'Ruby', 'PHP', 'Swift', 'Kotlin', 'Rust', 'TypeScript', 'English', 'Русский'];
 export const getLanguageFromTags = (tags: string[]): string | null => {
-  if (!tags) return null;
+  if (!Array.isArray(tags)) return null;
   for (const tag of tags) {
     if (KNOWN_LANGUAGES.includes(tag)) {
       return tag;
@@ -144,12 +178,12 @@ export const getLanguageFromTags = (tags: string[]): string | null => {
 
 export const createNewLessonPage = (type: 'METHODICAL' | 'ASSIGNMENT', sortOrder: number): LessonPage => {
     return {
-        id: `temp-${uuidv4()}`,
-        title: type === 'METHODICAL' ? 'Новая страница' : 'Новое задание',
+        id: `temp-${uuidv4()}`, 
+        title: type === 'METHODICAL' ? 'Новая страница (текст)' : 'Новое задание (тест)',
         page_type: type,
         sort_order: sortOrder,
-        content: '',
-        questions: [],
+        content: '', 
+        questions: [], 
     };
 };
 
@@ -157,10 +191,11 @@ export const createNewQuestion = (sortOrder: number): Question => {
     return {
         id: `temp-${uuidv4()}`,
         text: 'Новый вопрос...',
-        type: 'TEXT_INPUT',
-        correct_answer: '', // Default empty correct answer
+        type: 'TEXT_INPUT', 
+        correct_answer: '', 
         sort_order: sortOrder,
-        options: [],
+        options: [], 
+        isAttemptAllowed: true, // New questions allow attempts
     };
 };
 

@@ -2,12 +2,64 @@
 const db = require('../config/db');
 const CourseModel = require('./Course'); // To use formatting and helper functions
 
-/**
- * Получение записей пользователя на курсы по статусу
- * @param {string} userId - ID пользователя
- * @param {string} status - Статус ('inProgress', 'completed')
- * @returns {Promise<Array>} - Массив записей с данными курсов
- */
+// _updateUserCourseProgress and _updateOverallCourseStats remain the same
+
+async function _updateUserCourseProgress(userId, courseId, client) {
+  const totalLessonsRes = await client.query(
+    'SELECT COUNT(*) as count FROM lessons WHERE course_id = $1',
+    [courseId]
+  );
+  const totalLessonsInCourse = parseInt(totalLessonsRes.rows[0].count, 10);
+
+  if (totalLessonsInCourse === 0) {
+    await client.query(
+      "UPDATE enrollments SET progress = 0, status = 'inProgress', finished_at = NULL WHERE user_id = $1 AND course_id = $2",
+      [userId, courseId]
+    );
+    return 0;
+  }
+
+  const completedLessonsRes = await client.query(
+    'SELECT COUNT(*) as count FROM lesson_progress WHERE user_id = $1 AND lesson_id IN (SELECT id FROM lessons WHERE course_id = $2) AND completed = true',
+    [userId, courseId]
+  );
+  const completedLessonsByUser = parseInt(completedLessonsRes.rows[0].count, 10);
+  const newProgress = parseFloat(((completedLessonsByUser / totalLessonsInCourse) * 100).toFixed(2));
+
+  let status = 'inProgress';
+  let finishedAtUpdateSql = 'finished_at = NULL'; // Default to reset finished_at if not completed
+
+  if (newProgress >= 100) {
+    status = 'completed';
+    // Only set finished_at if it's not already set
+    const currentEnrollment = await client.query('SELECT finished_at FROM enrollments WHERE user_id = $1 AND course_id = $2', [userId, courseId]);
+    if (currentEnrollment.rows.length > 0 && currentEnrollment.rows[0].finished_at === null) {
+        finishedAtUpdateSql = 'finished_at = CURRENT_TIMESTAMP';
+    } else if (currentEnrollment.rows.length > 0 && currentEnrollment.rows[0].finished_at !== null) {
+        // Keep existing finished_at if already set
+        finishedAtUpdateSql = 'finished_at = enrollments.finished_at'; // No change
+    }
+  }
+
+  await client.query(
+    `UPDATE enrollments 
+     SET progress = $1, status = $2, ${finishedAtUpdateSql}
+     WHERE user_id = $3 AND course_id = $4`,
+    [newProgress, status, userId, courseId]
+  );
+  return newProgress;
+}
+
+async function _updateOverallCourseStats(courseId, client) {
+  await client.query(
+    `UPDATE course_stats 
+     SET avg_completion = (SELECT AVG(progress) FROM enrollments WHERE course_id = $1 AND status = 'completed') -- Consider only completed for average
+     WHERE course_id = $1`,
+    [courseId]
+  );
+}
+
+
 const findByUserAndStatus = async (userId, status) => {
   const query = `
     SELECT
@@ -30,9 +82,8 @@ const findByUserAndStatus = async (userId, status) => {
   const result = await db.query(query, [userId, status]);
 
   return Promise.all(result.rows.map(async (row) => {
-    // Reconstruct a course-like object for formatCourseData
     const courseDataForFormatting = {
-      id: row.course_id_from_c, // Use alias to avoid conflict
+      id: row.course_id_from_c, 
       author_id: row.author_id,
       author_name: row.author_name,
       title: row.title,
@@ -43,14 +94,13 @@ const findByUserAndStatus = async (userId, status) => {
       is_published: row.is_published,
       enrollments: row.enrollments,
       avg_completion: row.avg_completion,
-      avg_rating: row.avg_rating, // Use new name
-      created_at: null, // Not directly available, not crucial for this view
-      updated_at: null, // Not directly available
+      avg_rating: row.avg_rating,
+      created_at: null, 
+      updated_at: null, 
     };
 
     const tags = await CourseModel.getCourseTagNames(row.course_id_from_c);
-    // Lesson summaries might be too much for this list view, can be simplified or fetched on demand
-    const lessonSummaries = await CourseModel.getCourseLessonSummaries(row.course_id_from_c);
+    const lessonSummaries = await CourseModel.getCourseLessonSummaries(row.course_id_from_c, db, userId);
     const formattedCourse = CourseModel.formatCourseData(courseDataForFormatting, tags, lessonSummaries);
 
     return {
@@ -58,19 +108,12 @@ const findByUserAndStatus = async (userId, status) => {
       progress: row.progress,
       startedAt: row.started_at,
       finishedAt: row.finished_at,
-      userRating: row.user_rating_value, // Rating from the ratings table
+      userRating: row.user_rating_value,
       course: formattedCourse,
     };
   }));
 };
 
-
-/**
- * Запись пользователя на курс
- * @param {string} userId - ID пользователя
- * @param {string} courseId - ID курса
- * @returns {Promise<Object>} - Созданная запись
- */
 const enrollCourse = async (userId, courseId) => {
   const client = await db.pool.connect();
   try {
@@ -84,45 +127,52 @@ const enrollCourse = async (userId, courseId) => {
       throw new Error('Course not found or not published');
     }
 
+    // Check for existing enrollment
     const existingEnrollment = await client.query(
-      'SELECT 1 FROM enrollments WHERE user_id = $1 AND course_id = $2',
+      'SELECT * FROM enrollments WHERE user_id = $1 AND course_id = $2',
       [userId, courseId]
     );
+
     if (existingEnrollment.rows.length > 0) {
-      throw new Error('Already enrolled');
+      // User is already enrolled, return existing enrollment data with a flag
+      await client.query('ROLLBACK'); // No changes to commit
+      return { ...existingEnrollment.rows[0], alreadyEnrolled: true };
     }
 
+    // New enrollment
     const result = await client.query(
       `INSERT INTO enrollments (user_id, course_id, status, progress, started_at)
        VALUES ($1, $2, 'inProgress', 0, CURRENT_TIMESTAMP) RETURNING *`,
       [userId, courseId]
     );
 
+    // Increment enrollments count in course_stats
     await client.query(
       `UPDATE course_stats SET enrollments = enrollments + 1 WHERE course_id = $1`,
       [courseId]
     );
     
-    // User stats are now dynamic, so no update to user_stats table here.
-    // The User model's findById/findByEmail will calculate active_courses.
-
     await client.query('COMMIT');
-    return result.rows[0];
+    return result.rows[0]; // This is a new enrollment, so no 'alreadyEnrolled' flag
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("Error enrolling in course:", error);
-    throw error;
+    // Check for unique constraint violation error code (23505 for PostgreSQL)
+    if (error.code === '23505') { 
+        // This case should ideally be caught by the explicit check above,
+        // but as a fallback for concurrent requests.
+        const currentEnrollment = await getProgress(userId, courseId); // Fetch existing one
+        if (currentEnrollment) {
+            return { ...currentEnrollment, alreadyEnrolled: true, message: "Concurrency: Already enrolled."};
+        }
+        throw new Error('Already enrolled (concurrent issue).');
+    }
+    throw error; // Re-throw other errors
   } finally {
-    client.release();
+    if (!client.isReleased) client.release();
   }
 };
 
-/**
- * Получение прогресса пользователя по курсу
- * @param {string} userId - ID пользователя
- * @param {string} courseId - ID курса
- * @returns {Promise<Object|null>} - Данные прогресса или null
- */
 const getProgress = async (userId, courseId) => {
   const result = await db.query(
     'SELECT * FROM enrollments WHERE user_id = $1 AND course_id = $2',
@@ -131,29 +181,19 @@ const getProgress = async (userId, courseId) => {
   return result.rows.length > 0 ? result.rows[0] : null;
 };
 
-/**
- * Оценка курса пользователем
- * @param {string} userId - ID пользователя
- * @param {string} courseId - ID курса
- * @param {number} value - Оценка (1-5)
- * @param {string} comment - Optional comment
- * @returns {Promise<Object>} - Созданная оценка
- */
 const rateCourse = async (userId, courseId, value, comment = null) => {
   const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
 
-    const enrollment = await getProgress(userId, courseId); // Uses default pool, fine for read
-    if (!enrollment) {
+    const enrollmentCheck = await client.query(
+      'SELECT 1 FROM enrollments WHERE user_id = $1 AND course_id = $2',
+      [userId, courseId]
+    );
+    if (enrollmentCheck.rows.length === 0) {
       throw new Error('Not enrolled in the course');
     }
-    // Optionally allow rating only completed courses
-    // if (enrollment.status !== 'completed') {
-    //   throw new Error('Course must be completed to rate');
-    // }
-
-    // Upsert rating (Insert or Update if exists)
+    
     const result = await client.query(
       `INSERT INTO ratings (user_id, course_id, value, comment, created_at, updated_at)
        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -163,7 +203,6 @@ const rateCourse = async (userId, courseId, value, comment = null) => {
       [userId, courseId, value, comment]
     );
 
-    // Update average rating in course_stats
     await client.query(
       `UPDATE course_stats
        SET avg_rating = (SELECT AVG(value)::numeric(3,2) FROM ratings WHERE course_id = $1)
@@ -182,9 +221,64 @@ const rateCourse = async (userId, courseId, value, comment = null) => {
   }
 };
 
+const markLessonComplete = async (userId, lessonId) => {
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const lessonInfoRes = await client.query('SELECT course_id FROM lessons WHERE id = $1', [lessonId]);
+    if (lessonInfoRes.rows.length === 0) {
+      throw new Error('Lesson not found.');
+    }
+    const courseId = lessonInfoRes.rows[0].course_id;
+
+    const enrollmentCheck = await client.query(
+      'SELECT 1 FROM enrollments WHERE user_id = $1 AND course_id = $2',
+      [userId, courseId]
+    );
+    if (enrollmentCheck.rows.length === 0) {
+      throw new Error('User not enrolled in this course.');
+    }
+
+    // Ensure lesson_progress record exists or is created, then set to completed
+    await client.query(
+      `INSERT INTO lesson_progress (user_id, lesson_id, completed, score, last_activity)
+       VALUES ($1, $2, true, COALESCE((SELECT score FROM lesson_progress WHERE user_id = $1 AND lesson_id = $2), 0), CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id, lesson_id) DO UPDATE SET 
+         completed = true, 
+         last_activity = CURRENT_TIMESTAMP
+      `,
+      [userId, lessonId]
+    );
+
+
+    await _updateUserCourseProgress(userId, courseId, client);
+    await _updateOverallCourseStats(courseId, client);
+
+    await client.query('COMMIT');
+    
+    const updatedEnrollment = await getProgress(userId, courseId); 
+    return {
+      message: 'Lesson marked complete.',
+      courseId: courseId,
+      lessonId: lessonId,
+      userProgress: updatedEnrollment.progress,
+      userStatus: updatedEnrollment.status
+    };
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("Error marking lesson complete:", error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   findByUserAndStatus,
   enrollCourse,
   getProgress,
   rateCourse,
+  markLessonComplete,
 };
