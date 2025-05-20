@@ -1,4 +1,5 @@
 // ==== File: frontend/src/api/coursesApi.ts ====
+// (Только измененная/добавленная часть mapApiCourseToFrontendCourse и зависимости)
 import client from './client';
 import type {
   Course,
@@ -6,24 +7,12 @@ import type {
   CourseContentUpdatePayload,
   LessonSummary, 
   LessonEditable,
-  AnswerPayload, // NEW
-  AnswerSubmissionResponse // NEW
+  Question as FrontendQuestionType, // Дадим псевдоним, чтобы избежать конфликта с переменной question
+  AnswerPayload, 
+  AnswerSubmissionResponse 
 } from '../types/Course';
 import { getDifficultyFromTags, getLanguageFromTags } from '../types/Course';
 
-interface ApiCourseParams {
-  search?: string;
-  sort?: string;
-  difficulty?: 'Beginner' | 'Middle' | 'Senior';
-  language?: string;
-  tags?: string; // Comma-separated string
-}
-
-// Helper to decide if lessons are summaries or editable based on structure
-function areLessonsEditable(lessons: any[]): lessons is LessonEditable[] {
-  if (lessons.length === 0) return false; // Or true, depending on desired default
-  return lessons.some(lesson => lesson.pages !== undefined); // Editable lessons have a 'pages' array
-}
 
 export const mapApiCourseToFrontendCourse = (apiCourse: any): Course => {
   if (!apiCourse || typeof apiCourse !== 'object') {
@@ -52,26 +41,37 @@ export const mapApiCourseToFrontendCourse = (apiCourse: any): Course => {
                 page_type: page.page_type,
                 sort_order: page.sort_order !== undefined ? page.sort_order : page.sortOrder,
                 content: page.content || '',
-                questions: Array.isArray(page.questions) ? page.questions.map((q: any) => ({
-                    id: q.id,
-                    text: q.text,
-                    type: q.type,
-                    correct_answer: q.correct_answer, 
-                    sort_order: q.sort_order !== undefined ? q.sort_order : q.sortOrder,
-                    options: Array.isArray(q.options) ? q.options.map(opt => ({
-                        ...opt,
-                        sort_order: opt.sort_order !== undefined ? opt.sort_order : opt.sortOrder,
-                    })) : [],
-                    userAnswer: undefined, // Initialize client-side state for answers
-                    isCorrect: null,       // Initialize client-side state for answers
-                    feedback: undefined    // Initialize client-side state for answers
-                })) : []
+                questions: Array.isArray(page.questions) ? page.questions.map((qFromApi: any): FrontendQuestionType => {
+                    // qFromApi.userAnswer теперь должен быть объектом { selectedOptionIds, answerText } или undefined
+                    // qFromApi.isCorrect должен быть boolean или null
+                    // qFromApi.userAnswerId должен быть string или undefined
+
+                    const isAttemptAllowedBasedOnCorrectness = qFromApi.isCorrect === true ? false : true;
+
+                    return {
+                        id: qFromApi.id,
+                        text: qFromApi.text,
+                        type: qFromApi.type,
+                        correct_answer: qFromApi.correct_answer, 
+                        sort_order: qFromApi.sort_order !== undefined ? qFromApi.sort_order : qFromApi.sortOrder,
+                        options: Array.isArray(qFromApi.options) ? qFromApi.options.map(opt => ({
+                            ...opt,
+                            sort_order: opt.sort_order !== undefined ? opt.sort_order : opt.sortOrder,
+                        })) : [],
+                        userAnswer: qFromApi.userAnswer, // Это уже должно быть в нужном формате {selectedOptionIds?, answerText?}
+                        userAnswerId: qFromApi.userAnswerId,
+                        isCorrect: qFromApi.isCorrect !== undefined ? qFromApi.isCorrect : null,
+                        // isAttemptAllowed будет управляться в CourseTakingPage на основе isCorrect и логики повторов
+                        // Здесь можно установить начальное значение, если бэк не передает его явно:
+                        isAttemptAllowed: qFromApi.isAttemptAllowed !== undefined ? qFromApi.isAttemptAllowed : isAttemptAllowedBasedOnCorrectness,
+                        feedback: undefined // feedback устанавливается на клиенте после попытки
+                    };
+                }) : []
             })) : [],
         } as LessonEditable;
     }
     return baseLesson as LessonSummary; 
   });
-
 
   return {
     id: apiCourse.id,
@@ -97,6 +97,8 @@ export const mapApiCourseToFrontendCourse = (apiCourse: any): Course => {
   };
 };
 
+// ... (остальные функции getCourses, getCourseById и т.д. без изменений)
+// Полный код для coursesApi.ts, чтобы было все в одном месте
 export async function getCourses(params?: {
   search?: string;
   sort?: string;
@@ -104,7 +106,7 @@ export async function getCourses(params?: {
   language?: string;
   tags?: string[];
 }): Promise<Course[]> {
-  const apiParams: ApiCourseParams = {};
+  const apiParams: any = {}; 
   if (params?.search) apiParams.search = params.search;
   if (params?.sort) apiParams.sort = params.sort;
   
@@ -135,7 +137,6 @@ export async function uploadCourseCover(formData: FormData): Promise<{ coverUrl:
   });
   return { coverUrl: response.data.avatarUrl };
 }
-
 
 export async function createCourseFacade(payload: CourseFacadePayload): Promise<Course> {
   const response = await client.post<any>('/courses', payload);
@@ -188,10 +189,9 @@ export async function markLessonCompleteApi(lessonId: string): Promise<MarkLesso
     return response.data;
 }
 
-// New function to submit an answer
 export async function submitAnswerApi(payload: AnswerPayload): Promise<AnswerSubmissionResponse> {
     const response = await client.post<AnswerSubmissionResponse>(
-        `/courses/answers/questions/${payload.questionId}/submit`, // Note: /courses prefix for route
+        `/courses/answers/questions/${payload.questionId}/submit`,
         { selectedOptionIds: payload.selectedOptionIds, answerText: payload.answerText }
     );
     return response.data;

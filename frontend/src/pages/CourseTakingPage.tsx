@@ -43,25 +43,36 @@ const CourseTakingPage: React.FC = () => {
 
   const [pageAnswers, setPageAnswers] = useState<Record<string, UserAnswerSubmission>>({});
 
-  // Helper to initialize/reset question states within lessons
-  // This should be called carefully to not overwrite user's current input in `pageAnswers`
+  // Helper to initialize question states like isAttemptAllowed
+  // Does NOT modify pageAnswers, only the question objects within lessons
   const initializeQuestionStatesInLessons = (lessonArray: LessonEditable[]): LessonEditable[] => {
     return lessonArray.map(l => ({
       ...l,
       pages: (l.pages || []).map(p => ({
         ...p,
-        questions: (p.questions || []).map(q => {
-            // If question was answered correctly, attempt is not allowed.
-            // Otherwise, allow attempt unless explicitly set to false elsewhere.
-            const allowAttempt = q.isCorrect === true ? false : (q.isAttemptAllowed !== undefined ? q.isAttemptAllowed : true);
-            return {
-                ...q,
-                isAttemptAllowed: allowAttempt,
-                // DO NOT reset userAnswer here, it's managed by pageAnswers and handleAnswerChange
-            };
-        })
+        questions: (p.questions || []).map(q => ({
+          ...q,
+          isAttemptAllowed: q.isCorrect === true ? false : (q.isAttemptAllowed !== undefined ? q.isAttemptAllowed : true),
+          // userAnswer comes from API mapping, do not reset it here
+        }))
       }))
     }));
+  };
+  
+  const populatePageAnswersFromLessonData = (lessonIdx: number, pageIdx: number, currentLessons: LessonEditable[]) => {
+    const newPageAnswers: Record<string, UserAnswerSubmission> = {};
+    const targetLesson = currentLessons[lessonIdx];
+    if (targetLesson) {
+        const targetPage = targetLesson.pages[pageIdx];
+        if (targetPage && targetPage.questions) {
+            targetPage.questions.forEach(q => {
+                if (q.userAnswer) { // userAnswer is populated by mapApiCourseToFrontendCourse
+                    newPageAnswers[q.id] = q.userAnswer;
+                }
+            });
+        }
+    }
+    setPageAnswers(newPageAnswers);
   };
 
 
@@ -86,18 +97,21 @@ const CourseTakingPage: React.FC = () => {
 
       sortedLessons = initializeQuestionStatesInLessons(sortedLessons);
       setLessons(sortedLessons);
-
       document.title = `Изучение: ${courseData.title || 'Курс'} - AI-Hunt`;
+
+      let lessonIdxToSet = currentLessonIndex;
+      let pageIdxToSet = currentPageIndex;
 
       if(resetNavigation) {
         let initialLessonIdx = sortedLessons.findIndex(l => !l.completedByUser);
         if (initialLessonIdx === -1 && sortedLessons.length > 0) initialLessonIdx = 0;
         else if (initialLessonIdx === -1) initialLessonIdx = 0; 
-
-        setCurrentLessonIndex(initialLessonIdx);
-        setCurrentPageIndex(0);
+        lessonIdxToSet = initialLessonIdx;
+        pageIdxToSet = 0;
+        setCurrentLessonIndex(lessonIdxToSet);
+        setCurrentPageIndex(pageIdxToSet);
       }
-      setPageAnswers({}); // Clear local pageAnswers cache on full data fetch/reload
+      populatePageAnswersFromLessonData(lessonIdxToSet, pageIdxToSet, sortedLessons);
 
     } catch (err: any) {
       console.error("Error fetching course for taking:", err);
@@ -106,25 +120,23 @@ const CourseTakingPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [courseId]); // Removed dependencies that were causing issues
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId]); // currentLessonIndex & currentPageIndex removed to avoid loop with populatePageAnswers
 
   useEffect(() => {
     if (!authLoading && user) {
-        fetchCourseData(); // Call fetchCourseData when auth state is ready
+        fetchCourseData();
     } else if (!authLoading && !user) {
         navigate('/');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, user, courseId, navigate]);
+  }, [authLoading, user, courseId, navigate]); 
   
-  // This effect runs when the current page/lesson changes
   useEffect(() => {
-    setPageAnswers({}); // Clear answers for the new page
+    // When page/lesson changes, (re)populate pageAnswers for the new current page from `lessons` state
+    populatePageAnswersFromLessonData(currentLessonIndex, currentPageIndex, lessons);
     setActionError(null); 
-    // No need to call initializeQuestionStatesInLessons here again if fetchCourseData does it
-    // and fetchCourseData is called appropriately when data needs refresh.
-    // The key is that the `lessons` state itself should hold the correct `isAttemptAllowed`.
-  }, [currentPageIndex, currentLessonIndex]);
+  }, [currentPageIndex, currentLessonIndex, lessons]);
 
 
   const currentLesson = useMemo(() => lessons[currentLessonIndex], [lessons, currentLessonIndex]);
@@ -138,18 +150,10 @@ const CourseTakingPage: React.FC = () => {
 
   const handleAnswerChange = (questionId: string, answer: UserAnswerSubmission) => {
     setPageAnswers(prev => ({ ...prev, [questionId]: answer }));
-    // No need to update `lessons` state here for `userAnswer`.
-    // `QuestionInput` will use `pageAnswers[question.id]` for its `currentAnswer` prop.
   };
 
   const handleRetryQuestion = (questionId: string) => {
-    // Clear the specific answer from local state
-    setPageAnswers(prev => {
-        const newAnswers = {...prev};
-        delete newAnswers[questionId]; // Or set to empty: newAnswers[questionId] = {};
-        return newAnswers;
-    });
-    // Update the question in the main `lessons` state to allow new attempt
+    setPageAnswers(prev => ({...prev, [questionId]: {} })); 
     setLessons(prevLessons => prevLessons.map((l, lIdx) => {
         if (lIdx === currentLessonIndex) {
             return {
@@ -176,7 +180,6 @@ const CourseTakingPage: React.FC = () => {
     if (!answerToSubmit || ( (answerToSubmit.selectedOptionIds === undefined || answerToSubmit.selectedOptionIds.length === 0) && (answerToSubmit.answerText === undefined || answerToSubmit.answerText.trim() === ''))) {
         const errorMsg = "Ответ не выбран или не введен.";
         setActionError(errorMsg);
-        // Update question's feedback in lessons state
         setLessons(prevLessons => prevLessons.map((l, lIdx) => lIdx === currentLessonIndex ? { ...l, pages: l.pages.map((p, pIdx) => pIdx === currentPageIndex ? { ...p, questions: p.questions.map(q => q.id === questionId ? { ...q, feedback: errorMsg, isCorrect: false, isAttemptAllowed: true } : q) } : p) } : l));
         return;
     }
@@ -200,8 +203,9 @@ const CourseTakingPage: React.FC = () => {
                                     q.id === questionId ? { 
                                         ...q, 
                                         isCorrect: response.data.is_correct, 
-                                        feedback: response.data.is_correct ? "Верно!" : (q.feedback || "Попробуйте еще раз."), // Preserve existing feedback if any, or set new
-                                        isAttemptAllowed: !response.data.is_correct 
+                                        feedback: response.data.is_correct ? "Верно!" : (q.feedback || "Попробуйте еще раз."),
+                                        isAttemptAllowed: !response.data.is_correct,
+                                        userAnswer: answerToSubmit 
                                     } : q
                                 )
                             };
@@ -270,8 +274,6 @@ const CourseTakingPage: React.FC = () => {
     setActionError(null);
     try {
         await markLessonCompleteApi(currentLesson.id);
-        // Re-fetch all course data to ensure all statuses are correctly updated from the source of truth (backend)
-        // Pass false to fetchCourseData to prevent resetting navigation to the first uncompleted lesson
         await fetchCourseData(false); 
     } catch (err: any) {
         setActionError(err.response?.data?.message || "Ошибка при завершении урока.");

@@ -16,15 +16,21 @@ export interface QuestionOption {
 export interface Question {
   id: string;
   page_id?: string;
-  text: string; // Markdown
+  text: string; 
   type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TEXT_INPUT' | 'CODE_INPUT';
   correct_answer?: string | null; 
   sort_order: number;
   options: QuestionOption[];
-  userAnswer?: UserAnswerSubmission; 
-  isCorrect?: boolean | null; // null = not answered/checked, true/false after check
+  userAnswer?: UserAnswerSubmission; // Предыдущий ответ пользователя (для отображения)
+  userAnswerId?: string; // NEW: ID записи user_question_answers
+  isCorrect?: boolean | null; 
   feedback?: string; 
-  isAttemptAllowed?: boolean; // NEW: true by default, false after correct answer or if logic dictates no more tries.
+  isAttemptAllowed?: boolean; 
+}
+
+export interface UserAnswerSubmission { // This is what the input fields will modify
+    selectedOptionIds?: string[];
+    answerText?: string;
 }
 
 export interface LessonPage {
@@ -195,7 +201,7 @@ export const createNewQuestion = (sortOrder: number): Question => {
         correct_answer: '', 
         sort_order: sortOrder,
         options: [], 
-        isAttemptAllowed: true, // New questions allow attempts
+        isAttemptAllowed: true, 
     };
 };
 

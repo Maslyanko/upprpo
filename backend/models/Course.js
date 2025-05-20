@@ -1,6 +1,4 @@
 // ==== File: backend/models/Course.js ====
-// ==== File: backend/models/Course.js ====
-// ==== File: backend/models/Course.js ====
 const db = require('../config/db');
 const Tag = require('./Tag'); // For tag handling
 
@@ -105,6 +103,141 @@ const formatCourseData = (courseRow, tags, lessons) => {
   };
 };
 
+
+/**
+ * Helper function to get user's answers for all questions in a course.
+ * @param {string} userId 
+ * @param {string} courseId 
+ * @param {object} dbClient 
+ * @returns {Promise<Object>} A map where key is question_id and value is the answer data.
+ */
+async function getUserAnswersForCourse(userId, courseId, dbClient = db) {
+  if (!userId) return {}; // No user, no answers
+
+  const query = `
+    SELECT
+      uqa.question_id,
+      uqa.selected_option_ids,
+      uqa.answer_text,
+      uqa.is_correct,
+      uqa.id as user_answer_id  -- ID of the user_question_answers record
+    FROM user_question_answers uqa
+    INNER JOIN questions q ON uqa.question_id = q.id
+    INNER JOIN lesson_pages lp ON q.page_id = lp.id
+    INNER JOIN lessons l ON lp.lesson_id = l.id
+    WHERE uqa.user_id = $1 AND l.course_id = $2;
+  `;
+  const result = await dbClient.query(query, [userId, courseId]);
+  
+  const answersMap = {};
+  for (const row of result.rows) {
+    answersMap[row.question_id] = {
+      userAnswerId: row.user_answer_id,
+      selectedOptionIds: row.selected_option_ids, // Will be null or array
+      answerText: row.answer_text,               // Will be null or string
+      isCorrect: row.is_correct,
+    };
+  }
+  return answersMap;
+}
+
+
+const findById = async (id, version = null, userIdForProgress = null, dbClient = db) => {
+  let queryText = `
+    SELECT
+      c.id, c.author_id, u.full_name AS author_name, c.title, c.description,
+      c.cover_url, c.estimated_duration, c.version, c.is_published,
+      COALESCE(cs.enrollments, 0) AS enrollments,
+      COALESCE(cs.avg_completion, 0) AS avg_completion,
+      COALESCE(cs.avg_rating, 0) AS avg_rating,
+      c.created_at, c.updated_at
+    FROM courses c
+    JOIN users u ON c.author_id = u.id
+    LEFT JOIN course_stats cs ON c.id = cs.course_id
+    WHERE c.id = $1
+  `;
+  const queryParams = [id];
+  if (version) {
+    queryText += ` AND c.version = $2`;
+    queryParams.push(version);
+  } else {
+    queryText += ` ORDER BY c.is_published DESC, c.version DESC LIMIT 1`;
+  }
+
+  const result = await dbClient.query(queryText, queryParams);
+  if (result.rows.length === 0) return null;
+
+  const courseRow = result.rows[0];
+  const courseTags = await getCourseTagNames(courseRow.id, dbClient);
+  
+  // Fetch user's previous answers for all questions in this course
+  const userAnswersMap = userIdForProgress 
+    ? await getUserAnswersForCourse(userIdForProgress, courseRow.id, dbClient) 
+    : {};
+
+  const lessonsResult = await dbClient.query(
+    `SELECT id, title, description, sort_order FROM lessons WHERE course_id = $1 ORDER BY sort_order`,
+    [courseRow.id]
+  );
+
+  const detailedLessons = [];
+  for (const lesson of lessonsResult.rows) {
+    const pagesResult = await dbClient.query(
+      `SELECT id, title, page_type, sort_order FROM lesson_pages WHERE lesson_id = $1 ORDER BY sort_order`,
+      [lesson.id]
+    );
+    const pages = [];
+    for (const page of pagesResult.rows) {
+      let pageDetails = { ...page, content: null, questions: [] };
+      if (page.page_type === 'METHODICAL') {
+        const contentResult = await dbClient.query('SELECT content FROM methodical_page_content WHERE page_id = $1', [page.id]);
+        if (contentResult.rows.length > 0) {
+          pageDetails.content = contentResult.rows[0].content;
+        }
+      } else if (page.page_type === 'ASSIGNMENT') {
+        const questionsResult = await dbClient.query(
+          'SELECT id, text, type, correct_answer, sort_order FROM questions WHERE page_id = $1 ORDER BY sort_order',
+          [page.id]
+        );
+        for (const questionRow of questionsResult.rows) { // Renamed to questionRow to avoid conflict
+          const optionsResult = await dbClient.query(
+            'SELECT id, label, is_correct, sort_order FROM question_options WHERE question_id = $1 ORDER BY sort_order',
+            [questionRow.id]
+          );
+          
+          const prevUserAnswer = userAnswersMap[questionRow.id]; // Get previous answer for this question
+          const questionForFrontend = { 
+            ...questionRow, 
+            options: optionsResult.rows,
+            // Populate userAnswer field for frontend state management (UserAnswerSubmission type)
+            userAnswer: prevUserAnswer ? {
+                selectedOptionIds: prevUserAnswer.selectedOptionIds,
+                answerText: prevUserAnswer.answerText
+            } : undefined, // If no previous answer, userAnswer is undefined
+            userAnswerId: prevUserAnswer ? prevUserAnswer.userAnswerId : undefined,
+            isCorrect: prevUserAnswer ? prevUserAnswer.isCorrect : null, // null if not answered
+          };
+          pageDetails.questions.push(questionForFrontend);
+        }
+      }
+      pages.push(pageDetails);
+    }
+
+    let completedByUser = false;
+    if (userIdForProgress) {
+      const progressCheck = await dbClient.query(
+        'SELECT completed FROM lesson_progress WHERE user_id = $1 AND lesson_id = $2',
+        [userIdForProgress, lesson.id]
+      );
+      if (progressCheck.rows.length > 0) {
+        completedByUser = progressCheck.rows[0].completed;
+      }
+    }
+    detailedLessons.push({ ...lesson, pages, completedByUser });
+  }
+  return formatCourseData(courseRow, courseTags, detailedLessons);
+};
+
 const findAll = async (filters = {}, userIdForProgress = null) => {
   const { search, tags: filterTags = [], difficulty, language } = filters;
 
@@ -162,85 +295,6 @@ const findAll = async (filters = {}, userIdForProgress = null) => {
     const lessonSummaries = await getCourseLessonSummaries(row.id, db, userIdForProgress); // Pass db and userIdForProgress
     return formatCourseData(row, courseTags, lessonSummaries);
   }));
-};
-
-// Signature changed: dbClient is now the last optional parameter.
-const findById = async (id, version = null, userIdForProgress = null, dbClient = db) => {
-  let queryText = `
-    SELECT
-      c.id, c.author_id, u.full_name AS author_name, c.title, c.description,
-      c.cover_url, c.estimated_duration, c.version, c.is_published,
-      COALESCE(cs.enrollments, 0) AS enrollments,
-      COALESCE(cs.avg_completion, 0) AS avg_completion,
-      COALESCE(cs.avg_rating, 0) AS avg_rating,
-      c.created_at, c.updated_at
-    FROM courses c
-    JOIN users u ON c.author_id = u.id
-    LEFT JOIN course_stats cs ON c.id = cs.course_id
-    WHERE c.id = $1
-  `;
-  const queryParams = [id];
-  if (version) {
-    queryText += ` AND c.version = $2`;
-    queryParams.push(version);
-  } else {
-    queryText += ` ORDER BY c.is_published DESC, c.version DESC LIMIT 1`;
-  }
-
-  const result = await dbClient.query(queryText, queryParams);
-  if (result.rows.length === 0) return null;
-
-  const courseRow = result.rows[0];
-  const courseTags = await getCourseTagNames(courseRow.id, dbClient);
-
-  const lessonsResult = await dbClient.query(
-    `SELECT id, title, description, sort_order FROM lessons WHERE course_id = $1 ORDER BY sort_order`,
-    [courseRow.id]
-  );
-
-  const detailedLessons = [];
-  for (const lesson of lessonsResult.rows) {
-    const pagesResult = await dbClient.query(
-      `SELECT id, title, page_type, sort_order FROM lesson_pages WHERE lesson_id = $1 ORDER BY sort_order`,
-      [lesson.id]
-    );
-    const pages = [];
-    for (const page of pagesResult.rows) {
-      let pageDetails = { ...page, content: null, questions: [] };
-      if (page.page_type === 'METHODICAL') {
-        const contentResult = await dbClient.query('SELECT content FROM methodical_page_content WHERE page_id = $1', [page.id]);
-        if (contentResult.rows.length > 0) {
-          pageDetails.content = contentResult.rows[0].content;
-        }
-      } else if (page.page_type === 'ASSIGNMENT') {
-        const questionsResult = await dbClient.query(
-          'SELECT id, text, type, correct_answer, sort_order FROM questions WHERE page_id = $1 ORDER BY sort_order',
-          [page.id]
-        );
-        for (const question of questionsResult.rows) {
-          const optionsResult = await dbClient.query(
-            'SELECT id, label, is_correct, sort_order FROM question_options WHERE question_id = $1 ORDER BY sort_order',
-            [question.id]
-          );
-          pageDetails.questions.push({ ...question, options: optionsResult.rows });
-        }
-      }
-      pages.push(pageDetails);
-    }
-
-    let completedByUser = false;
-    if (userIdForProgress) {
-      const progressCheck = await dbClient.query(
-        'SELECT completed FROM lesson_progress WHERE user_id = $1 AND lesson_id = $2',
-        [userIdForProgress, lesson.id]
-      );
-      if (progressCheck.rows.length > 0) {
-        completedByUser = progressCheck.rows[0].completed;
-      }
-    }
-    detailedLessons.push({ ...lesson, pages, completedByUser });
-  }
-  return formatCourseData(courseRow, courseTags, detailedLessons);
 };
 
 async function _updateOrInsertLessons(dbClient, courseId, lessonsData) {
