@@ -10,7 +10,7 @@ interface QuestionInputProps {
   currentAnswer: UserAnswerSubmission | undefined;
   onAnswerChange: (questionId: string, answer: UserAnswerSubmission) => void;
   onSubmitAnswer: (questionId: string) => void;
-  onRetryQuestion: (questionId: string) => void; // NEW: For retrying
+  onRetryQuestion: (questionId: string) => void;
   isSubmitting: boolean;
 }
 
@@ -20,7 +20,7 @@ const QuestionInput: React.FC<QuestionInputProps> = ({
   currentAnswer,
   onAnswerChange,
   onSubmitAnswer,
-  onRetryQuestion, // NEW
+  onRetryQuestion,
   isSubmitting,
 }) => {
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -46,8 +46,11 @@ const QuestionInput: React.FC<QuestionInputProps> = ({
                      : question.isCorrect === false ? 'border-red-500 bg-red-50' 
                      : 'border-gray-200 bg-white';
   
-  // Disable inputs if the question is answered correctly OR if an attempt is not allowed (though isAttemptAllowed is primary)
-  const disableInputs = isSubmitting || question.isCorrect === true || !question.isAttemptAllowed;
+  // Главное условие блокировки: если вопрос уже правильно отвечен ИЛИ если IsAttemptAllowed явно false.
+  // Если isCorrect === null (еще не отвечали), то isAttemptAllowed должно быть true.
+  // Если isCorrect === false, то isAttemptAllowed решает, можно ли еще пытаться.
+  const disableInputs = isSubmitting || question.isCorrect === true || (question.isAttemptAllowed === false && question.isCorrect !== null);
+
 
   return (
     <div className={`p-4 border rounded-lg shadow-sm mb-6 ${feedbackClass}`}>
@@ -100,29 +103,38 @@ const QuestionInput: React.FC<QuestionInputProps> = ({
           value={currentAnswer?.answerText || ''}
           onChange={handleTextChange}
           rows={question.type === 'CODE_INPUT' ? 6 : 3}
-          className={`form-textarea w-full text-sm ${disableInputs ? 'bg-gray-100' : ''}`}
+          className={`form-textarea w-full text-sm ${disableInputs ? 'bg-gray-100 opacity-70' : ''}`}
           placeholder={question.type === 'CODE_INPUT' ? "Введите ваш код..." : "Введите ваш ответ..."}
           disabled={disableInputs}
         />
       )}
       
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
-        {question.isAttemptAllowed && question.isCorrect === null && ( // Show "Ответить" only if attempt allowed and not yet answered
+        {/* Показываем кнопку "Ответить" только если:
+            1. Попытка разрешена (isAttemptAllowed === true)
+            2. Вопрос еще не был правильно отвечен (isCorrect !== true)
+            3. Вопрос не находится в процессе отправки (isSubmitting === false)
+        */}
+        {question.isAttemptAllowed && question.isCorrect !== true && !isSubmitting && (
             <button
                 onClick={() => onSubmitAnswer(question.id)}
-                disabled={isSubmitting}
                 className="btn-primary text-sm py-1.5 px-3"
             >
-                {isSubmitting ? 'Отправка...' : 'Ответить'}
+                Ответить
             </button>
         )}
+         {isSubmitting && (
+             <span className="text-sm text-gray-500 italic">Отправка...</span>
+         )}
+
 
         {question.isCorrect === true && <span className="text-sm font-medium text-green-600">Верно! {question.feedback || ''}</span>}
         
         {question.isCorrect === false && (
             <div className="flex items-center gap-2">
                  <span className="text-sm font-medium text-red-600">Неверно. {question.feedback || ''}</span>
-                {question.isAttemptAllowed && ( // Show retry only if attempts are still allowed
+                {/* Показываем "Попробовать снова" только если попытка разрешена (т.е. isAttemptAllowed === true) */}
+                {question.isAttemptAllowed && ( 
                     <button
                         onClick={() => onRetryQuestion(question.id)}
                         className="btn-outline text-xs py-1 px-2 border-orange-500 text-orange-600 hover:bg-orange-50"
@@ -132,7 +144,8 @@ const QuestionInput: React.FC<QuestionInputProps> = ({
                 )}
             </div>
         )}
-         {question.isCorrect !== null && !question.isAttemptAllowed && question.isCorrect === false && (
+        {/* Если isCorrect === false И isAttemptAllowed === false, значит попытки закончились */}
+         {question.isCorrect === false && !question.isAttemptAllowed && (
              <span className="text-sm font-medium text-gray-500 italic">Попытки закончились.</span>
          )}
       </div>

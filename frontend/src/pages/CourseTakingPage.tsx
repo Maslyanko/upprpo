@@ -8,7 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import QuestionInput from '@/components/course_taking/QuestionInput';
 
-// Icons (assuming they are defined or imported as before)
+// Icons
 const ChevronLeftIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
@@ -43,6 +43,28 @@ const CourseTakingPage: React.FC = () => {
 
   const [pageAnswers, setPageAnswers] = useState<Record<string, UserAnswerSubmission>>({});
 
+  // Helper to initialize/reset question states within lessons
+  // This should be called carefully to not overwrite user's current input in `pageAnswers`
+  const initializeQuestionStatesInLessons = (lessonArray: LessonEditable[]): LessonEditable[] => {
+    return lessonArray.map(l => ({
+      ...l,
+      pages: (l.pages || []).map(p => ({
+        ...p,
+        questions: (p.questions || []).map(q => {
+            // If question was answered correctly, attempt is not allowed.
+            // Otherwise, allow attempt unless explicitly set to false elsewhere.
+            const allowAttempt = q.isCorrect === true ? false : (q.isAttemptAllowed !== undefined ? q.isAttemptAllowed : true);
+            return {
+                ...q,
+                isAttemptAllowed: allowAttempt,
+                // DO NOT reset userAnswer here, it's managed by pageAnswers and handleAnswerChange
+            };
+        })
+      }))
+    }));
+  };
+
+
   const fetchCourseData = useCallback(async (resetNavigation = true) => {
     if (!courseId) {
       setError("ID курса не указан."); setIsLoading(false); return;
@@ -54,16 +76,17 @@ const CourseTakingPage: React.FC = () => {
         throw new Error("Некорректные данные курса получены.");
       }
       setCourse(courseData);
-      const sortedLessons = (courseData.lessons as LessonEditable[])
+      
+      let sortedLessons = (courseData.lessons as LessonEditable[])
         .sort((a, b) => a.sort_order - b.sort_order)
         .map(l => ({
             ...l,
-            pages: (l.pages || []).map(p => ({
-                ...p,
-                questions: (p.questions || []).map(q => ({...q, isAttemptAllowed: q.isCorrect !== true })) // Set initial attemptAllowed based on loaded correctness
-            })).sort((pa, pb) => pa.sort_order - pb.sort_order)
+            pages: (l.pages || []).sort((pa, pb) => pa.sort_order - pb.sort_order)
         }));
+
+      sortedLessons = initializeQuestionStatesInLessons(sortedLessons);
       setLessons(sortedLessons);
+
       document.title = `Изучение: ${courseData.title || 'Курс'} - AI-Hunt`;
 
       if(resetNavigation) {
@@ -73,8 +96,8 @@ const CourseTakingPage: React.FC = () => {
 
         setCurrentLessonIndex(initialLessonIdx);
         setCurrentPageIndex(0);
-        setPageAnswers({});
       }
+      setPageAnswers({}); // Clear local pageAnswers cache on full data fetch/reload
 
     } catch (err: any) {
       console.error("Error fetching course for taking:", err);
@@ -83,19 +106,24 @@ const CourseTakingPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [courseId]);
+  }, [courseId]); // Removed dependencies that were causing issues
 
   useEffect(() => {
     if (!authLoading && user) {
-        fetchCourseData();
+        fetchCourseData(); // Call fetchCourseData when auth state is ready
     } else if (!authLoading && !user) {
         navigate('/');
     }
-  }, [fetchCourseData, authLoading, user, navigate]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user, courseId, navigate]);
   
+  // This effect runs when the current page/lesson changes
   useEffect(() => {
-    setPageAnswers({});
-    setActionError(null);
+    setPageAnswers({}); // Clear answers for the new page
+    setActionError(null); 
+    // No need to call initializeQuestionStatesInLessons here again if fetchCourseData does it
+    // and fetchCourseData is called appropriately when data needs refresh.
+    // The key is that the `lessons` state itself should hold the correct `isAttemptAllowed`.
   }, [currentPageIndex, currentLessonIndex]);
 
 
@@ -110,29 +138,18 @@ const CourseTakingPage: React.FC = () => {
 
   const handleAnswerChange = (questionId: string, answer: UserAnswerSubmission) => {
     setPageAnswers(prev => ({ ...prev, [questionId]: answer }));
-    setLessons(prevLessons => prevLessons.map((l, lIdx) => {
-        if (lIdx === currentLessonIndex) {
-            return {
-                ...l,
-                pages: l.pages.map((p, pIdx) => {
-                    if (pIdx === currentPageIndex) {
-                        return {
-                            ...p,
-                            questions: p.questions.map(q => 
-                                q.id === questionId ? { ...q, userAnswer: answer } : q
-                            )
-                        };
-                    }
-                    return p;
-                })
-            };
-        }
-        return l;
-    }));
+    // No need to update `lessons` state here for `userAnswer`.
+    // `QuestionInput` will use `pageAnswers[question.id]` for its `currentAnswer` prop.
   };
 
   const handleRetryQuestion = (questionId: string) => {
-    setPageAnswers(prev => ({...prev, [questionId]: {} })); // Clear previous answer attempt from local state
+    // Clear the specific answer from local state
+    setPageAnswers(prev => {
+        const newAnswers = {...prev};
+        delete newAnswers[questionId]; // Or set to empty: newAnswers[questionId] = {};
+        return newAnswers;
+    });
+    // Update the question in the main `lessons` state to allow new attempt
     setLessons(prevLessons => prevLessons.map((l, lIdx) => {
         if (lIdx === currentLessonIndex) {
             return {
@@ -157,8 +174,10 @@ const CourseTakingPage: React.FC = () => {
   const handleSubmitAnswer = async (questionId: string) => {
     const answerToSubmit = pageAnswers[questionId];
     if (!answerToSubmit || ( (answerToSubmit.selectedOptionIds === undefined || answerToSubmit.selectedOptionIds.length === 0) && (answerToSubmit.answerText === undefined || answerToSubmit.answerText.trim() === ''))) {
-        setActionError("Ответ не выбран или не введен.");
-        setLessons(prevLessons => prevLessons.map((l, lIdx) => lIdx === currentLessonIndex ? { ...l, pages: l.pages.map((p, pIdx) => pIdx === currentPageIndex ? { ...p, questions: p.questions.map(q => q.id === questionId ? { ...q, feedback: "Ответ не выбран или не введен."} : q) } : p) } : l));
+        const errorMsg = "Ответ не выбран или не введен.";
+        setActionError(errorMsg);
+        // Update question's feedback in lessons state
+        setLessons(prevLessons => prevLessons.map((l, lIdx) => lIdx === currentLessonIndex ? { ...l, pages: l.pages.map((p, pIdx) => pIdx === currentPageIndex ? { ...p, questions: p.questions.map(q => q.id === questionId ? { ...q, feedback: errorMsg, isCorrect: false, isAttemptAllowed: true } : q) } : p) } : l));
         return;
     }
     setIsSubmittingAnswer(prev => ({...prev, [questionId]: true}));
@@ -181,8 +200,8 @@ const CourseTakingPage: React.FC = () => {
                                     q.id === questionId ? { 
                                         ...q, 
                                         isCorrect: response.data.is_correct, 
-                                        feedback: response.data.is_correct ? "Верно!" : "Попробуйте еще раз.",
-                                        isAttemptAllowed: !response.data.is_correct // Allow retry only if incorrect
+                                        feedback: response.data.is_correct ? "Верно!" : (q.feedback || "Попробуйте еще раз."), // Preserve existing feedback if any, or set new
+                                        isAttemptAllowed: !response.data.is_correct 
                                     } : q
                                 )
                             };
@@ -196,7 +215,7 @@ const CourseTakingPage: React.FC = () => {
     } catch (err: any) {
         const apiErrorMsg = err.response?.data?.message || "Ошибка при отправке ответа.";
         setActionError(apiErrorMsg);
-        setLessons(prevLessons => prevLessons.map((l, lIdx) => lIdx === currentLessonIndex ? { ...l, pages: l.pages.map((p, pIdx) => pIdx === currentPageIndex ? { ...p, questions: p.questions.map(q => q.id === questionId ? { ...q, feedback: apiErrorMsg } : q) } : p) } : l));
+        setLessons(prevLessons => prevLessons.map((l, lIdx) => lIdx === currentLessonIndex ? { ...l, pages: l.pages.map((p, pIdx) => pIdx === currentPageIndex ? { ...p, questions: p.questions.map(q => q.id === questionId ? { ...q, feedback: apiErrorMsg, isCorrect: false, isAttemptAllowed: true } : q) } : p) } : l));
     } finally {
         setIsSubmittingAnswer(prev => ({...prev, [questionId]: false}));
     }
@@ -224,50 +243,36 @@ const CourseTakingPage: React.FC = () => {
     }
   };
   
-  // Check if all questions in the current lesson's assignment pages are correctly answered
   const allLessonAssignmentsCorrect = useMemo(() => {
     if (!currentLesson) return false;
     for (const page of currentLesson.pages) {
       if (page.page_type === 'ASSIGNMENT') {
-        if (page.questions.length === 0) continue; // Skip empty assignment pages for this check
+        if (page.questions.length === 0) continue; 
         for (const question of page.questions) {
           if (question.isCorrect !== true) {
-            return false; // Found an unanswered or incorrectly answered question
+            return false; 
           }
         }
       }
     }
-    return true; // All assignment questions are correct, or no assignment pages
+    return true; 
   }, [currentLesson]);
 
-
   const handleMarkLessonComplete = async () => {
-    if (!currentLesson || currentLesson.completedByUser || !allLessonAssignmentsCorrect) return; // Only allow if all assignments are correct
+    if (!currentLesson || currentLesson.completedByUser || !allLessonAssignmentsCorrect) {
+        if(!allLessonAssignmentsCorrect) {
+            setActionError("Не все задания в уроке выполнены правильно.");
+        }
+        return;
+    }
     
     setIsCompletingLesson(true);
     setActionError(null);
     try {
         await markLessonCompleteApi(currentLesson.id);
-        // Fetch fresh data to ensure progress and lesson statuses are up-to-date from backend
-        await fetchCourseData(false); // false to not reset navigation if user is on last lesson
-        
-        // After fetching, determine if we should navigate or stay
-        const updatedLessons = (await getCourseById(courseId!)).lessons as LessonEditable[]; // Re-fetch for safety
-        const reSortedLessons = updatedLessons.sort((a, b) => a.sort_order - b.sort_order);
-        setLessons(reSortedLessons);
-
-        // Smart navigation: try to go to next uncompleted lesson or next page
-        const currentLessonStillExists = reSortedLessons.find(l => l.id === currentLesson.id);
-        if (currentLessonStillExists && currentLessonStillExists.completedByUser) {
-             // If current lesson is now complete, try to move
-            if (currentPageIndex < currentLesson.pages.length - 1) {
-                setCurrentPageIndex(prev => prev + 1);
-            } else if (currentLessonIndex < reSortedLessons.length - 1) {
-                setCurrentLessonIndex(prev => prev + 1);
-                setCurrentPageIndex(0);
-            }
-        }
-       
+        // Re-fetch all course data to ensure all statuses are correctly updated from the source of truth (backend)
+        // Pass false to fetchCourseData to prevent resetting navigation to the first uncompleted lesson
+        await fetchCourseData(false); 
     } catch (err: any) {
         setActionError(err.response?.data?.message || "Ошибка при завершении урока.");
     } finally {
@@ -289,9 +294,7 @@ const CourseTakingPage: React.FC = () => {
   }
 
   const isOnLastPageOfLesson = currentPageIndex === currentLesson.pages.length - 1;
-  // Button "Завершить урок" is enabled if on last page of lesson, lesson not yet complete, AND all assignments in lesson are correct.
   const canEnableCompleteLessonButton = isOnLastPageOfLesson && !currentLesson.completedByUser && allLessonAssignmentsCorrect;
-
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
@@ -347,12 +350,12 @@ const CourseTakingPage: React.FC = () => {
                 {currentPage.questions.map((q, qIndex) => (
                   <QuestionInput
                     key={q.id}
-                    question={q}
+                    question={q} 
                     questionIndex={qIndex}
                     currentAnswer={pageAnswers[q.id]}
                     onAnswerChange={handleAnswerChange}
                     onSubmitAnswer={handleSubmitAnswer}
-                    onRetryQuestion={handleRetryQuestion} // Pass retry handler
+                    onRetryQuestion={handleRetryQuestion}
                     isSubmitting={isSubmittingAnswer[q.id] || false}
                   />
                 ))}
